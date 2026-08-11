@@ -56,6 +56,14 @@ def jenkins_status_style(status: str) -> str:
     return f"{base} background-color: #475569; color: #ffffff;"
 
 
+def addition_style(_value: Any) -> str:
+    return "color: #16a34a; font-weight: 700;"
+
+
+def deletion_style(_value: Any) -> str:
+    return "color: #dc2626; font-weight: 700;"
+
+
 @st.cache_data(ttl=60, show_spinner=False)
 def dashboard_rows(
     github_api_url: str,
@@ -167,6 +175,9 @@ def main() -> None:
     display_rows = []
     for row in filtered_rows:
         display_row = dict(row)
+        title = str(display_row["PR Title"]).replace("\n", " ")
+        link = str(display_row.pop("Link")).split("#", 1)[0]
+        display_row["PR Title"] = f"{link}#sled-dog-title={title}"
         display_row["Labels"] = ", ".join(row.get("Labels", [])) or "—"
         display_rows.append(display_row)
 
@@ -174,18 +185,24 @@ def main() -> None:
     status_column = "Jenkins Build Status"
     if jenkins_api_url:
         table[status_column] = table[status_column].map(jenkins_status_indicator)
+    displayed_table = table.style.map(addition_style, subset=["Additions"]).map(
+        deletion_style, subset=["Deletions"]
+    )
     if jenkins_api_url:
-        displayed_table = table.style.map(
+        displayed_table = displayed_table.map(
             jenkins_status_style, subset=[status_column]
         )
-    else:
-        displayed_table = table
 
     column_config = {
-        "PR Title": st.column_config.TextColumn("PR Title"),
-        "Link": st.column_config.LinkColumn("Link", display_text="Open PR ↗"),
+        "PR Title": st.column_config.LinkColumn(
+            "PR Title",
+            display_text=r".*#sled-dog-title=(.*)",
+            width="large",
+        ),
         "Repository": st.column_config.TextColumn("Repository"),
         "Labels": st.column_config.TextColumn("Labels"),
+        "Additions": st.column_config.NumberColumn("Additions", format="+%d"),
+        "Deletions": st.column_config.NumberColumn("Deletions", format="−%d"),
     }
     if jenkins_api_url:
         column_config[status_column] = st.column_config.TextColumn(

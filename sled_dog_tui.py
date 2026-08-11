@@ -51,6 +51,14 @@ def build_status(status: str) -> Text:
     return Text(f"⚪ {status}", style="bold white on #475569")
 
 
+def addition_count(value: Any) -> Text:
+    return Text(f"+{int(value):,}", style="bold #4ade80")
+
+
+def deletion_count(value: Any) -> Text:
+    return Text(f"−{int(value):,}", style="bold #f87171")
+
+
 class SledDogApp(App[Optional[str]]):
     TITLE = "Sled Dog"
     SUB_TITLE = "Pull request command center"
@@ -130,7 +138,13 @@ class SledDogApp(App[Optional[str]]):
         self.settings = resolved_settings()
         self.rows: list[dict[str, Any]] = []
         self.filtered_rows: list[dict[str, Any]] = []
-        self.columns = ["PR Title", "Repository", "Labels"]
+        self.columns = [
+            "PR Title",
+            "Repository",
+            "Labels",
+            "Additions",
+            "Deletions",
+        ]
         if self.settings["jenkins_api_url"]:
             self.columns.append("Jenkins Build Status")
         if self.settings["digital_ai_enabled"]:
@@ -235,8 +249,14 @@ class SledDogApp(App[Optional[str]]):
             cells: list[Any] = []
             for column in self.columns:
                 value = row.get(column, "—")
-                if column == "Labels":
+                if column == "PR Title":
+                    cells.append(Text(str(value), style="bold cyan underline"))
+                elif column == "Labels":
                     cells.append(label_pills(value))
+                elif column == "Additions":
+                    cells.append(addition_count(value))
+                elif column == "Deletions":
+                    cells.append(deletion_count(value))
                 elif column == "Jenkins Build Status":
                     cells.append(build_status(str(value)))
                 else:
@@ -254,6 +274,10 @@ class SledDogApp(App[Optional[str]]):
     @on(Checkbox.Changed, "#match-all")
     def match_mode_changed(self, _event: Checkbox.Changed) -> None:
         self.apply_filters()
+
+    @on(DataTable.RowSelected, "#pull-requests")
+    def row_selected(self, _event: DataTable.RowSelected) -> None:
+        self.action_open_pr()
 
     def selected_link(self) -> str:
         if not self.filtered_rows:

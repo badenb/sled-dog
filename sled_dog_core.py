@@ -56,6 +56,8 @@ def _pull_request_details(
         "title": str(item.get("title", "Untitled pull request")),
         "link": str(item.get("html_url", "")),
         "sha": str(pr_payload.get("head", {}).get("sha", "")),
+        "additions": int(pr_payload.get("additions") or 0),
+        "deletions": int(pr_payload.get("deletions") or 0),
         "repository": repository_url.rstrip("/").rsplit("/", 1)[-1],
         "labels": sorted(
             str(label.get("name", ""))
@@ -162,6 +164,8 @@ def dashboard_rows(
             "Link": pr["link"],
             "Repository": pr["repository"],
             "Labels": pr["labels"],
+            "Additions": pr["additions"],
+            "Deletions": pr["deletions"],
             "_sha": pr["sha"],
         }
         for pr in pull_requests

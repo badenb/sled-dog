@@ -9,6 +9,8 @@ Sled Dog is a keyboard-friendly terminal dashboard that gives teams a live view 
 | 📝 **PR Title** | What is changing |
 | 🔗 **PR actions** | Open or copy the selected pull request link |
 | 🏷️ **Labels** | How the pull request is categorized |
+| 📈 **Additions** | How many lines were added |
+| 📉 **Deletions** | How many lines were removed |
 | 🏗️ **Jenkins Status** | Whether the latest commit is healthy |
 | 🎫 **Digital.ai Ticket** | Which `B-1234` or `S-987` work item the PR belongs to |
 
@@ -351,13 +353,15 @@ python -m pip install textual requests streamlit pandas
 
 ## 🖥️ Using the dashboard
 
-The terminal table contains up to five columns. Optional provider columns are hidden when their integrations are skipped:
+The terminal table contains up to seven columns. Optional provider columns are hidden when their integrations are skipped:
 
 | Column | Meaning |
 | --- | --- |
-| **PR Title** | The title currently stored in GitHub. |
+| **PR Title** | The pull request title and its link. Click it on the web or select it and press Enter in the terminal. |
 | **Repository** | The GitHub repository containing the pull request. |
 | **Labels** | The labels currently applied to the pull request. |
+| **Additions** | Added lines, shown as a green `+N`. |
+| **Deletions** | Removed lines, shown as a red `−N`. |
 | **Jenkins Build Status** | The normalized status returned by Jenkins; hidden when Jenkins is skipped. |
 | **Digital.ai Ticket** | The first matching ticket ID in the title; hidden when detection is skipped. |
 
@@ -385,6 +389,7 @@ Press `l` to focus the label filter, then enter one or more exact label names se
 | Key | Action |
 | --- | --- |
 | `↑` / `↓` | Select a pull request. |
+| `Enter` | Open the selected PR. |
 | `r` | Refresh immediately. |
 | `l` | Focus the label filter. |
 | `o` | Open the selected PR in a browser. |
