@@ -2,7 +2,7 @@
 
 > **Your pull requests, build health, and Digital.ai tickets—all in one friendly dashboard.**
 
-Sled Dog is a lightweight, single-file Streamlit dashboard that gives teams a quick view of open pull requests across an entire GitHub organization.
+Sled Dog is a lightweight, locally run dashboard that gives teams a quick view of open pull requests across an entire GitHub organization.
 
 | What you see | What it tells you |
 | --- | --- |
@@ -12,9 +12,9 @@ Sled Dog is a lightweight, single-file Streamlit dashboard that gives teams a qu
 | 🎫 **Digital.ai Ticket** | Which `B-1234` or `S-987` work item the PR belongs to |
 
 > [!TIP]
-> Jenkins and GitHub authentication are optional. You can start with public GitHub data and connect more services later.
+> Run `./sled-dog` and the setup wizard handles configuration. Jenkins, Digital.ai ticket detection, and GitHub authentication can all be skipped and connected later.
 
-All URLs, organization names, usernames, and tokens come from environment variables or a local `.env` file. Credentials are never hard-coded in the application.
+Sled Dog saves ordinary settings in your macOS Application Support directory and stores tokens securely in macOS Keychain. Users do not need to create or edit a `.env` file. Environment variables remain available as an advanced option for development and automation.
 
 ## 🧭 Table of contents
 
@@ -31,14 +31,15 @@ All URLs, organization names, usernames, and tokens come from environment variab
 
 ## 🔄 How it works
 
-When the dashboard loads, Sled Dog:
+When Sled Dog starts, it:
 
-1. Searches GitHub for open pull requests in the configured organization.
-2. Retrieves the head commit SHA for every pull request.
-3. Searches each pull request title for a Digital.ai ID matching `[B|S]-\d+`, such as `B-1234` or `S-987`.
-4. If Jenkins is configured, inserts the commit SHA into its API URL.
-5. Requests and normalizes the Jenkins build status, or displays `Not configured`.
-6. Displays the collected information in a Streamlit table.
+1. Runs a friendly connection wizard the first time you enter `./sled-dog`.
+2. Stores tokens in macOS Keychain and non-secret preferences in Application Support.
+3. Searches GitHub for open pull requests in the configured organization.
+4. Retrieves the head commit SHA for every pull request.
+5. Optionally detects Digital.ai IDs such as `B-1234` or `S-987`.
+6. Optionally retrieves and normalizes Jenkins build statuses.
+7. Opens the local Streamlit dashboard in your browser.
 
 Results are cached for 60 seconds. The **Refresh** button clears the cache and immediately requests fresh data.
 
@@ -50,6 +51,7 @@ Before starting, install:
 
 - Python 3.9 or newer
 - `pip`
+- macOS for secure Keychain-based token storage in this first release
 - Access to the GitHub organization you want to monitor
 - Optionally, a GitHub token for private repositories and higher API rate limits
 - Optionally, access to a Jenkins JSON endpoint that can look up a build using a commit SHA
@@ -63,7 +65,7 @@ Sled Dog uses three runtime Python packages:
 No additional UI framework is required.
 
 > [!NOTE]
-> New to Python? Follow the setup steps in order. The virtual environment keeps everything isolated from the rest of your computer.
+> New to Python? Follow the setup steps in order. After installation, normal use is simply `./sled-dog`.
 
 <a id="setup"></a>
 
@@ -80,46 +82,38 @@ git clone <repository-url>
 cd sled-dog
 ```
 
-### 2️⃣ Create a virtual environment
+### 2️⃣ Start the launcher
 
-Using a virtual environment keeps Sled Dog's packages isolated from other Python projects.
+Make the launcher executable if Git did not preserve its permission:
 
-#### 🍎 macOS or 🐧 Linux
+```bash
+chmod +x sled-dog
+```
+
+Then run:
+
+```bash
+./sled-dog
+```
+
+That is the entire normal installation flow. On its first run, Sled Dog:
+
+1. opens the connection wizard;
+2. tests and saves the chosen providers;
+3. offers to create an isolated `.venv` environment;
+4. installs Streamlit, Requests, and pandas inside that environment; and
+5. launches the dashboard.
+
+Nothing is installed globally, and future runs reuse the isolated environment automatically.
+
+### 3️⃣ Manual dependency setup *(developers only)*
+
+Most users should skip this section. To manage the environment yourself:
 
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-```
-
-#### 🪟 Windows PowerShell
-
-```powershell
-py -m venv .venv
-.venv\Scripts\Activate.ps1
-```
-
-#### 🪟 Windows Command Prompt
-
-```bat
-py -m venv .venv
-.venv\Scripts\activate.bat
-```
-
-When the environment is active, the terminal prompt will usually begin with `(.venv)`.
-
-### 3️⃣ Install the dependencies
-
-```bash
-python -m pip install --upgrade pip
 python -m pip install streamlit requests pandas
-```
-
-On systems where `python` refers to Python 2 or is not available, use `python3` instead.
-
-Verify the installation:
-
-```bash
-python -c "import pandas, requests, streamlit; print('Dependencies installed')"
 ```
 
 ### 4️⃣ Create a GitHub token *(optional)*
@@ -135,9 +129,11 @@ If the organization enforces SAML SSO, authorize the token for that organization
 > [!CAUTION]
 > Keep the token private. Never commit it to Git, paste it into `app.py`, or include it in screenshots, chat messages, and logs. If a token is exposed, revoke it immediately.
 
+Keep the token ready for the setup wizard. Input remains hidden while you paste it, and Sled Dog stores it in macOS Keychain.
+
 ### 5️⃣ Prepare the Jenkins endpoint *(optional)*
 
-Jenkins integration is optional. When `JENKINS_BUILD_API_URL` is omitted, the dashboard still loads and displays `Not configured` in the Jenkins status column.
+Jenkins integration is optional. When it is skipped, the dashboard still loads and hides the Jenkins status column.
 
 Jenkins does not provide one universal commit-to-build lookup URL. When enabled, Sled Dog accepts a URL template in `JENKINS_BUILD_API_URL`. The template **must** contain the literal placeholder `{sha}`.
 
@@ -206,9 +202,33 @@ If only one of these variables is set, Jenkins authentication is not sent.
 
 ## ⚙️ Configuration
 
-### 6️⃣ Configure environment variables
+### 6️⃣ Run the guided setup
 
-Sled Dog supports either operating-system environment variables or a `.env` file in the directory from which Streamlit is started. Existing operating-system variables take precedence over values in `.env`.
+Start the connection wizard:
+
+```bash
+./sled-dog configure
+```
+
+The wizard walks through GitHub, optional Jenkins integration, and optional Digital.ai ticket detection. GitHub is tested before anything is saved. Press Enter to accept a displayed default, and rerun the command whenever you want to add, skip, or update a provider.
+
+Check the current connections without displaying secrets:
+
+```bash
+./sled-dog status
+```
+
+Sled Dog stores non-secret settings here:
+
+```text
+~/Library/Application Support/Sled Dog/config.json
+```
+
+GitHub and Jenkins tokens are stored under the `com.sled-dog.cli` service in macOS Keychain. They are never written to `config.json`.
+
+#### 🧑‍💻 Advanced: environment variables and `.env`
+
+The wizard is the recommended configuration method. For development and automation, Sled Dog also supports operating-system environment variables or a `.env` file in the project directory. Environment variables take precedence over settings saved by the wizard.
 
 Create a file named `.env` next to `app.py`:
 
@@ -216,7 +236,7 @@ Create a file named `.env` next to `app.py`:
 GITHUB_API_URL=https://api.github.com
 GITHUB_ORG=your-organization
 # Optional: needed for private GitHub repositories and higher rate limits.
-GITHUB_TOKEN=github_pat_replace_with_your_token
+GITHUB_TOKEN=YOUR_GITHUB_TOKEN
 
 # Optional: omit all Jenkins settings to run without build statuses.
 JENKINS_BUILD_API_URL=https://jenkins.example.com/job/my-job/commit/{sha}/api/json
@@ -236,6 +256,7 @@ Replace every example value with the correct value for your environment.
 | `JENKINS_BUILD_API_URL` | No | JSON endpoint template used to look up a build. When supplied, it must contain `{sha}`. |
 | `JENKINS_USERNAME` | No | Jenkins username used for HTTP basic authentication. |
 | `JENKINS_API_TOKEN` | No | Jenkins API token used for HTTP basic authentication. |
+| `DIGITAL_AI_ENABLED` | No | Set to `false`, `no`, `off`, or `0` to disable ticket extraction. |
 
 #### 🏢 GitHub Enterprise Server
 
@@ -271,7 +292,7 @@ $env:JENKINS_BUILD_API_URL = "https://jenkins.example.com/job/my-job/commit/{sha
 
 These values normally apply only to the current terminal session.
 
-### 7️⃣ Protect local secrets
+### 7️⃣ Protect local development secrets
 
 Add the following entries to the project's `.gitignore` before using a `.env` file:
 
@@ -294,10 +315,18 @@ git status
 
 ### 8️⃣ Start Sled Dog
 
-From the directory containing `app.py` and `.env`, run:
+After setup, launch Sled Dog from the project directory:
 
 ```bash
-streamlit run app.py
+./sled-dog
+```
+
+On the first run, this command automatically starts setup if no saved configuration exists. Later runs go directly to the dashboard. You can also use the explicit command `./sled-dog run`.
+
+For development, Streamlit can still be launched directly:
+
+```bash
+python -m streamlit run app.py
 ```
 
 Streamlit will print a local URL, normally:
@@ -310,24 +339,24 @@ Open that URL in a browser. Streamlit usually opens it automatically.
 
 To stop the server, return to the terminal and press `Ctrl+C`.
 
-If the `streamlit` command cannot be found, make sure the virtual environment is active or run:
+If Streamlit cannot be found, activate the virtual environment and reinstall the dependencies:
 
 ```bash
-python -m streamlit run app.py
+python -m pip install streamlit requests pandas
 ```
 
 <a id="using-the-dashboard"></a>
 
 ## 🖥️ Using the dashboard
 
-The table contains four columns:
+The table contains up to four columns. Optional provider columns are hidden when their integrations are skipped:
 
 | Column | Meaning |
 | --- | --- |
 | **PR Title** | The title currently stored in GitHub. |
 | **Link** | A clickable link that opens the pull request. |
-| **Jenkins Build Status** | The normalized status returned by the configured Jenkins endpoint. |
-| **Digital.ai Ticket** | The first matching ticket ID in the title, or `—` if none is found. |
+| **Jenkins Build Status** | The normalized status returned by Jenkins; hidden when Jenkins is skipped. |
+| **Digital.ai Ticket** | The first matching ticket ID in the title; hidden when detection is skipped. |
 
 Jenkins states use both color and an icon, making them quick to scan without relying on color alone:
 
@@ -341,6 +370,16 @@ Jenkins states use both color and an icon, making them quick to scan without rel
 | ⚪ | Gray | Unknown, not found, or not configured |
 
 Click **Refresh** to clear Sled Dog's 60-second cache and reload the data. Refreshing a large organization may take time because Sled Dog retrieves details for each pull request and, when Jenkins is configured, makes one Jenkins request per pull request.
+
+### ⌨️ Launcher commands
+
+| Command | Purpose |
+| --- | --- |
+| `./sled-dog` | Configure on first run, then launch the dashboard. |
+| `./sled-dog run` | Launch the dashboard. |
+| `./sled-dog configure` | Add, skip, or update provider connections. |
+| `./sled-dog status` | Show connection status without revealing tokens. |
+| `./sled-dog --help` | Display command help. |
 
 ## 🎫 Pull request title convention
 
@@ -366,11 +405,11 @@ Example:
 Missing required setting: GITHUB_ORG
 ```
 
-Only `GITHUB_API_URL` and `GITHUB_ORG` are required. Make sure the missing variable exists in the process environment or in a `.env` file located in the directory where you ran Streamlit. Restart Streamlit after changing the file.
+Only the GitHub API URL and organization are required. Run `./sled-dog configure` to supply or correct them. If you use environment variables instead, restart Sled Dog after changing them.
 
-### 📴 Jenkins displays `Not configured`
+### 📴 The Jenkins column is missing
 
-This is expected when `JENKINS_BUILD_API_URL` is omitted. Add the Jenkins URL template if you want build statuses; otherwise, no action is required.
+This is expected when Jenkins was skipped during setup. Run `./sled-dog configure` and connect Jenkins if you want build statuses; otherwise, no action is required.
 
 ### 🔗 Jenkins URL must contain `{sha}`
 
@@ -441,6 +480,7 @@ python -m pip install --upgrade streamlit requests pandas
 ## 🛡️ Security recommendations
 
 - Grant tokens only the read permissions Sled Dog needs.
+- Use the setup wizard so local tokens are stored in macOS Keychain rather than a plain-text file.
 - Use a dedicated service account for a shared deployment.
 - Store production secrets in the deployment platform's secret manager or environment configuration rather than in a copied `.env` file.
 - Never expose Sled Dog publicly without authentication and network controls. The dashboard reveals repository activity, pull request titles, build results, and internal links.
@@ -480,6 +520,9 @@ During local development, Streamlit detects most source changes and offers to re
 
 ## 🚧 Current limitations
 
+- This source-based preview still requires Python 3.9 or newer. A standalone executable or Homebrew package is the next step toward a dependency-free user installation.
+- Secure wizard-based token persistence currently targets macOS Keychain. Windows Credential Manager and Linux Secret Service support are planned.
+- The current interface launches in a browser; a full-screen terminal interface is a future option.
 - Optional Jenkins commit lookup depends on an environment-specific URL template; Jenkins installations may require a plugin or proxy endpoint.
 - GitHub and Jenkins calls are performed sequentially, so large result sets may load slowly.
 - Only the first Digital.ai ticket ID found in a title is shown.
@@ -490,9 +533,11 @@ During local development, Streamlit detects most source changes and offers to re
 
 ```text
 sled-dog/
-├── app.py       # Complete Streamlit application
-├── README.md    # Setup and usage documentation
-└── .env         # Local configuration; create this file and do not commit it
+├── .streamlit/
+│   └── config.toml      # Local Streamlit interface settings
+├── sled-dog             # Setup wizard and application launcher
+├── sled_dog_config.py   # Shared settings and macOS Keychain integration
+├── app.py               # Streamlit dashboard
+├── README.md            # Setup and usage documentation
+└── .env                 # Optional development override; do not commit it
 ```
-
-The application itself remains entirely contained in `app.py`.

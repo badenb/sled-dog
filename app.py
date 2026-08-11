@@ -1,16 +1,7 @@
 """Sled Dog — a Streamlit dashboard for open GitHub pull requests.
 
-Required environment variables (or matching entries in a local .env file):
-    GITHUB_API_URL=https://api.github.com
-    GITHUB_ORG=your-organization
-
-Optional integrations and authentication:
-    GITHUB_TOKEN=github-token
-    JENKINS_BUILD_API_URL=https://jenkins.example.com/job/my-job/commit/{sha}/api/json
-    JENKINS_USERNAME=jenkins-user
-    JENKINS_API_TOKEN=jenkins-api-token
-
-Run with: streamlit run app.py
+Use ``./sled-dog`` for guided setup and launch. Environment variables and a local
+``.env`` file remain available as development overrides.
 """
 
 from __future__ import annotations
@@ -23,6 +14,8 @@ from typing import Any
 import pandas as pd
 import requests
 import streamlit as st
+
+from sled_dog_config import resolved_settings
 
 
 DIGITAL_AI_PATTERN = re.compile(r"[B|S]-\d+", re.IGNORECASE)
@@ -47,13 +40,6 @@ def load_dotenv(path: str = ".env") -> None:
 
 
 load_dotenv()
-
-
-def required_setting(name: str) -> str:
-    value = os.getenv(name, "").strip()
-    if not value:
-        raise ValueError(f"Missing required setting: {name}")
-    return value
 
 
 def response_json(response: requests.Response, service: str) -> Any:
@@ -146,14 +132,17 @@ def jenkins_status(payload: Any) -> str:
     return "Unknown"
 
 
-def fetch_jenkins_build_status(url_template: str, sha: str) -> str:
+def fetch_jenkins_build_status(
+    url_template: str,
+    sha: str,
+    username: str = "",
+    api_token: str = "",
+) -> str:
     if not sha:
         return "No commit SHA"
     if "{sha}" not in url_template:
         raise ValueError("JENKINS_BUILD_API_URL must contain the {sha} placeholder")
 
-    username = os.getenv("JENKINS_USERNAME", "").strip()
-    api_token = os.getenv("JENKINS_API_TOKEN", "").strip()
     auth = (username, api_token) if username and api_token else None
     response = requests.get(
         url_template.format(sha=sha),
@@ -211,43 +200,57 @@ def dashboard_rows(
     github_org: str,
     github_token: str,
     jenkins_api_url: str,
+    jenkins_username: str,
+    jenkins_api_token: str,
+    digital_ai_enabled: bool,
 ) -> list[dict[str, str]]:
     rows: list[dict[str, str]] = []
     for pr in fetch_open_pull_requests(github_api_url, github_org, github_token):
         ticket = DIGITAL_AI_PATTERN.search(pr["title"])
+        row = {
+            "PR Title": pr["title"],
+            "Link": pr["link"],
+        }
         if jenkins_api_url:
             try:
-                build_status = fetch_jenkins_build_status(jenkins_api_url, pr["sha"])
+                build_status = fetch_jenkins_build_status(
+                    jenkins_api_url,
+                    pr["sha"],
+                    jenkins_username,
+                    jenkins_api_token,
+                )
             except (requests.RequestException, RuntimeError) as exc:
                 build_status = f"Error: {exc}"
-        else:
-            build_status = "Not configured"
-        rows.append(
-            {
-                "PR Title": pr["title"],
-                "Link": pr["link"],
-                "Jenkins Build Status": build_status,
-                "Digital.ai Ticket": ticket.group(0).upper() if ticket else "—",
-            }
-        )
+            row["Jenkins Build Status"] = build_status
+        if digital_ai_enabled:
+            row["Digital.ai Ticket"] = ticket.group(0).upper() if ticket else "—"
+        rows.append(row)
     return rows
 
 
 def main() -> None:
     st.set_page_config(page_title="Sled Dog", page_icon="🐕", layout="wide")
     st.title("🐕 Sled Dog")
-    st.caption("Open pull requests, build health, and Digital.ai tickets")
+    st.caption("Open pull requests with optional build and ticket context")
 
+    settings = resolved_settings()
     try:
-        github_api_url = required_setting("GITHUB_API_URL")
-        github_org = required_setting("GITHUB_ORG")
-        github_token = os.getenv("GITHUB_TOKEN", "").strip()
-        jenkins_api_url = os.getenv("JENKINS_BUILD_API_URL", "").strip()
+        github_api_url = settings["github_api_url"]
+        github_org = settings["github_org"]
+        github_token = settings["github_token"]
+        jenkins_api_url = settings["jenkins_api_url"]
+        jenkins_username = settings["jenkins_username"]
+        jenkins_api_token = settings["jenkins_api_token"]
+        digital_ai_enabled = settings["digital_ai_enabled"]
+        if not github_api_url:
+            raise ValueError("Missing GitHub API URL. Run: ./sled-dog configure")
+        if not github_org:
+            raise ValueError("Missing GitHub organization. Run: ./sled-dog configure")
         if jenkins_api_url and "{sha}" not in jenkins_api_url:
             raise ValueError("JENKINS_BUILD_API_URL must contain the {sha} placeholder")
     except ValueError as exc:
         st.error(str(exc))
-        st.info("Add the setting to your environment or to a local .env file.")
+        st.info("Run ./sled-dog configure, then restart the dashboard.")
         st.stop()
 
     col1, col2 = st.columns([1, 5])
@@ -260,13 +263,20 @@ def main() -> None:
         jenkins_access = "connected" if jenkins_api_url else "not configured"
         st.write(
             f"GitHub organization: **{github_org}** ({github_access}) · "
-            f"Jenkins: **{jenkins_access}**"
+            f"Jenkins: **{jenkins_access}** · "
+            f"Digital.ai IDs: **{'enabled' if digital_ai_enabled else 'disabled'}**"
         )
 
     try:
         with st.spinner("Fetching open pull requests and Jenkins statuses..."):
             rows = dashboard_rows(
-                github_api_url, github_org, github_token, jenkins_api_url
+                github_api_url,
+                github_org,
+                github_token,
+                jenkins_api_url,
+                jenkins_username,
+                jenkins_api_token,
+                digital_ai_enabled,
             )
     except (requests.RequestException, RuntimeError, ValueError) as exc:
         st.error(f"Unable to load pull requests: {exc}")
@@ -278,26 +288,38 @@ def main() -> None:
 
     table = pd.DataFrame(rows)
     status_column = "Jenkins Build Status"
-    table[status_column] = table[status_column].map(jenkins_status_indicator)
-    styled_table = table.style.map(jenkins_status_style, subset=[status_column])
+    if jenkins_api_url:
+        table[status_column] = table[status_column].map(jenkins_status_indicator)
+        displayed_table = table.style.map(
+            jenkins_status_style, subset=[status_column]
+        )
+    else:
+        displayed_table = table
+
+    column_config = {
+        "PR Title": st.column_config.TextColumn("PR Title"),
+        "Link": st.column_config.LinkColumn("Link", display_text="Open PR ↗"),
+    }
+    if jenkins_api_url:
+        column_config[status_column] = st.column_config.TextColumn(
+            "Jenkins Build Status"
+        )
+    if digital_ai_enabled:
+        column_config["Digital.ai Ticket"] = st.column_config.TextColumn(
+            "Digital.ai Ticket"
+        )
 
     st.dataframe(
-        styled_table,
-        column_config={
-            "PR Title": st.column_config.TextColumn("PR Title"),
-            "Link": st.column_config.LinkColumn("Link", display_text="Open PR ↗"),
-            "Jenkins Build Status": st.column_config.TextColumn(
-                "Jenkins Build Status"
-            ),
-            "Digital.ai Ticket": st.column_config.TextColumn("Digital.ai Ticket"),
-        },
+        displayed_table,
+        column_config=column_config,
         hide_index=True,
         use_container_width=True,
     )
-    st.caption(
-        "Jenkins legend: ✅ success · ❌ failure · ⚠️ unstable · "
-        "🔵 building or queued · ⏹️ aborted · ⚪ unavailable"
-    )
+    if jenkins_api_url:
+        st.caption(
+            "Jenkins legend: ✅ success · ❌ failure · ⚠️ unstable · "
+            "🔵 building or queued · ⏹️ aborted · ⚪ unavailable"
+        )
     st.caption(f"Showing {len(rows)} open pull request(s). Data is cached for 60 seconds.")
 
 
