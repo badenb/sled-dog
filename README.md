@@ -1,15 +1,35 @@
-# Sled Dog
+# 🐕 Sled Dog
 
-Sled Dog is a single-file Streamlit dashboard that gives teams a quick view of open pull requests across a GitHub organization. For every pull request, it displays:
+> **Your pull requests, build health, and Digital.ai tickets—all in one friendly dashboard.**
 
-- The pull request title
-- A clickable link to the pull request
-- The Jenkins build status for the pull request's latest commit
-- A Digital.ai ticket ID extracted from the pull request title
+Sled Dog is a lightweight, single-file Streamlit dashboard that gives teams a quick view of open pull requests across an entire GitHub organization.
 
-The dashboard reads all URLs, organization names, usernames, and tokens from environment variables or a local `.env` file. Credentials are not hard-coded in the application.
+| What you see | What it tells you |
+| --- | --- |
+| 📝 **PR Title** | What is changing |
+| 🔗 **Link** | Where to review the pull request |
+| 🏗️ **Jenkins Status** | Whether the latest commit is healthy |
+| 🎫 **Digital.ai Ticket** | Which `B-1234` or `S-987` work item the PR belongs to |
 
-## How it works
+> [!TIP]
+> Jenkins and GitHub authentication are optional. You can start with public GitHub data and connect more services later.
+
+All URLs, organization names, usernames, and tokens come from environment variables or a local `.env` file. Credentials are never hard-coded in the application.
+
+## 🧭 Table of contents
+
+- [How it works](#how-it-works)
+- [Requirements](#requirements)
+- [Setup](#setup)
+- [Configuration](#configuration)
+- [Using the dashboard](#using-the-dashboard)
+- [Troubleshooting](#troubleshooting)
+- [Security](#security)
+- [Current limitations](#limitations)
+
+<a id="how-it-works"></a>
+
+## 🔄 How it works
 
 When the dashboard loads, Sled Dog:
 
@@ -22,7 +42,9 @@ When the dashboard loads, Sled Dog:
 
 Results are cached for 60 seconds. The **Refresh** button clears the cache and immediately requests fresh data.
 
-## Requirements
+<a id="requirements"></a>
+
+## 📋 Requirements
 
 Before starting, install:
 
@@ -39,7 +61,14 @@ Sled Dog uses only two runtime Python packages:
 
 No additional UI framework is required.
 
-## 1. Download or clone the project
+> [!NOTE]
+> New to Python? Follow the setup steps in order. The virtual environment keeps everything isolated from the rest of your computer.
+
+<a id="setup"></a>
+
+## 🚀 Setup
+
+### 1️⃣ Download or clone the project
 
 Place `app.py` in a directory of your choice, then open a terminal in that directory.
 
@@ -50,25 +79,25 @@ git clone <repository-url>
 cd sled-dog
 ```
 
-## 2. Create a virtual environment
+### 2️⃣ Create a virtual environment
 
 Using a virtual environment keeps Sled Dog's packages isolated from other Python projects.
 
-### macOS or Linux
+#### 🍎 macOS or 🐧 Linux
 
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
 ```
 
-### Windows PowerShell
+#### 🪟 Windows PowerShell
 
 ```powershell
 py -m venv .venv
 .venv\Scripts\Activate.ps1
 ```
 
-### Windows Command Prompt
+#### 🪟 Windows Command Prompt
 
 ```bat
 py -m venv .venv
@@ -77,7 +106,7 @@ py -m venv .venv
 
 When the environment is active, the terminal prompt will usually begin with `(.venv)`.
 
-## 3. Install the dependencies
+### 3️⃣ Install the dependencies
 
 ```bash
 python -m pip install --upgrade pip
@@ -92,7 +121,7 @@ Verify the installation:
 python -c "import requests, streamlit; print('Dependencies installed')"
 ```
 
-## 4. Create a GitHub token (optional)
+### 4️⃣ Create a GitHub token *(optional)*
 
 Sled Dog can authenticate to GitHub using `GITHUB_TOKEN`, but the token is optional. Without one, GitHub only returns public repositories and applies a much lower API rate limit. A token is recommended and is necessary to see private repositories.
 
@@ -102,9 +131,10 @@ For a fine-grained personal access token, grant access to the desired organizati
 
 If the organization enforces SAML SSO, authorize the token for that organization after creating it. Organization policies may require an administrator to approve fine-grained tokens.
 
-Keep the token private. Do not commit it to Git, paste it into `app.py`, or include it in screenshots and logs.
+> [!CAUTION]
+> Keep the token private. Never commit it to Git, paste it into `app.py`, or include it in screenshots, chat messages, and logs. If a token is exposed, revoke it immediately.
 
-## 5. Prepare the Jenkins endpoint (optional)
+### 5️⃣ Prepare the Jenkins endpoint *(optional)*
 
 Jenkins integration is optional. When `JENKINS_BUILD_API_URL` is omitted, the dashboard still loads and displays `Not configured` in the Jenkins status column.
 
@@ -163,7 +193,7 @@ Status selection follows this order:
 
 An HTTP `404` response is displayed as `Not found`. Other errors appear in the affected pull request's build-status cell without preventing the rest of the table from loading.
 
-### Jenkins authentication
+#### 🔐 Jenkins authentication
 
 If Jenkins permits anonymous read access, no Jenkins credentials are needed.
 
@@ -171,7 +201,11 @@ If authentication is required, set both `JENKINS_USERNAME` and `JENKINS_API_TOKE
 
 If only one of these variables is set, Jenkins authentication is not sent.
 
-## 6. Configure environment variables
+<a id="configuration"></a>
+
+## ⚙️ Configuration
+
+### 6️⃣ Configure environment variables
 
 Sled Dog supports either operating-system environment variables or a `.env` file in the directory from which Streamlit is started. Existing operating-system variables take precedence over values in `.env`.
 
@@ -191,7 +225,7 @@ JENKINS_API_TOKEN=replace-with-your-jenkins-api-token
 
 Replace every example value with the correct value for your environment.
 
-### Configuration reference
+#### 📖 Configuration reference
 
 | Variable | Required | Description |
 | --- | --- | --- |
@@ -202,7 +236,7 @@ Replace every example value with the correct value for your environment.
 | `JENKINS_USERNAME` | No | Jenkins username used for HTTP basic authentication. |
 | `JENKINS_API_TOKEN` | No | Jenkins API token used for HTTP basic authentication. |
 
-### GitHub Enterprise Server
+#### 🏢 GitHub Enterprise Server
 
 For GitHub Enterprise Server, set `GITHUB_API_URL` to the installation's REST API base URL. It commonly has this form:
 
@@ -212,7 +246,7 @@ GITHUB_API_URL=https://github.example.com/api/v3
 
 Confirm the exact URL with your GitHub administrator.
 
-### Export variables without a `.env` file
+#### 💻 Export variables without a `.env` file
 
 On macOS or Linux:
 
@@ -236,7 +270,7 @@ $env:JENKINS_BUILD_API_URL = "https://jenkins.example.com/job/my-job/commit/{sha
 
 These values normally apply only to the current terminal session.
 
-## 7. Protect local secrets
+### 7️⃣ Protect local secrets
 
 Add the following entries to the project's `.gitignore` before using a `.env` file:
 
@@ -254,9 +288,10 @@ Before committing changes, verify that `.env` is not tracked:
 git status
 ```
 
-If a real token is accidentally committed or shared, revoke it immediately in GitHub or Jenkins and create a replacement. Removing the token from the latest file does not remove it from Git history.
+> [!WARNING]
+> If a real token is accidentally committed or shared, revoke it immediately in GitHub or Jenkins and create a replacement. Removing the token from the latest file does not remove it from Git history.
 
-## 8. Start Sled Dog
+### 8️⃣ Start Sled Dog
 
 From the directory containing `app.py` and `.env`, run:
 
@@ -280,7 +315,9 @@ If the `streamlit` command cannot be found, make sure the virtual environment is
 python -m streamlit run app.py
 ```
 
-## Using the dashboard
+<a id="using-the-dashboard"></a>
+
+## 🖥️ Using the dashboard
 
 The table contains four columns:
 
@@ -293,7 +330,7 @@ The table contains four columns:
 
 Click **Refresh** to clear Sled Dog's 60-second cache and reload the data. Refreshing a large organization may take time because Sled Dog retrieves details for each pull request and, when Jenkins is configured, makes one Jenkins request per pull request.
 
-## Pull request title convention
+## 🎫 Pull request title convention
 
 Sled Dog looks for the first ticket ID matching `[B|S]-\d+`, without regard to letter case. Expected titles include:
 
@@ -305,9 +342,11 @@ Fix S-987: prevent duplicate notifications
 
 These display `B-1234`, `S-987`, and `B-42`, respectively. A title without a match displays `—`.
 
-## Troubleshooting
+<a id="troubleshooting"></a>
 
-### Missing required setting
+## 🧰 Troubleshooting
+
+### ❓ Missing required setting
 
 Example:
 
@@ -317,11 +356,11 @@ Missing required setting: GITHUB_ORG
 
 Only `GITHUB_API_URL` and `GITHUB_ORG` are required. Make sure the missing variable exists in the process environment or in a `.env` file located in the directory where you ran Streamlit. Restart Streamlit after changing the file.
 
-### Jenkins displays `Not configured`
+### 📴 Jenkins displays `Not configured`
 
 This is expected when `JENKINS_BUILD_API_URL` is omitted. Add the Jenkins URL template if you want build statuses; otherwise, no action is required.
 
-### Jenkins URL must contain `{sha}`
+### 🔗 Jenkins URL must contain `{sha}`
 
 The URL template must include `{sha}` exactly, including the braces:
 
@@ -329,11 +368,11 @@ The URL template must include `{sha}` exactly, including the braces:
 JENKINS_BUILD_API_URL=https://jenkins.example.com/lookup/{sha}/api/json
 ```
 
-### GitHub returns HTTP 401
+### 🔑 GitHub returns HTTP 401
 
 The GitHub token is absent, expired, revoked, malformed, or not authorized for the organization. Create or authorize a valid token and restart the application.
 
-### GitHub returns HTTP 403
+### 🚧 GitHub returns HTTP 403
 
 Common causes include:
 
@@ -344,11 +383,11 @@ Common causes include:
 
 Check the message shown in the dashboard and the token's settings in GitHub.
 
-### Some private repositories are missing
+### 🔍 Some private repositories are missing
 
 GitHub search only returns repositories the token owner is permitted to see. Confirm both the account's repository access and the token's permissions.
 
-### Jenkins displays `Not found`
+### 🔎 Jenkins displays `Not found`
 
 Jenkins returned HTTP 404 for that commit. Confirm that:
 
@@ -357,27 +396,27 @@ Jenkins returned HTTP 404 for that commit. Confirm that:
 - The pipeline has reported or indexed that SHA.
 - A reverse proxy is not rewriting or blocking the route.
 
-### Jenkins displays `Unknown`
+### ❔ Jenkins displays `Unknown`
 
 The endpoint returned valid JSON but did not include a recognized status field. Update the endpoint or adapt `jenkins_status()` in `app.py` to the response shape used by your Jenkins installation.
 
-### Jenkins returns HTTP 401 or 403
+### 🔒 Jenkins returns HTTP 401 or 403
 
 Check `JENKINS_USERNAME` and `JENKINS_API_TOKEN`. Ensure the Jenkins account has permission to read the job and its build data. Both variables must be present for Sled Dog to send authentication.
 
-### Jenkins uses a private certificate authority
+### 📜 Jenkins uses a private certificate authority
 
 Install the organization's CA certificate for the Python environment or configure the host's certificate trust store. Do not disable TLS verification in application code; doing so exposes tokens and build data to interception.
 
-### Requests time out
+### ⏱️ Requests time out
 
 Each network request has a 20-second timeout. Check network access, VPN connectivity, DNS, firewall rules, proxy configuration, and the availability of GitHub and Jenkins.
 
-### The dashboard is slow
+### 🐌 The dashboard is slow
 
 Sled Dog makes one GitHub detail request and one Jenkins request for every open pull request. Large organizations or slow Jenkins servers can increase load time. The 60-second cache prevents repeated requests during ordinary Streamlit reruns.
 
-### The dependency import check fails
+### 📦 The dependency import check fails
 
 Activate the virtual environment and reinstall the packages:
 
@@ -385,7 +424,9 @@ Activate the virtual environment and reinstall the packages:
 python -m pip install --upgrade streamlit requests
 ```
 
-## Security recommendations
+<a id="security"></a>
+
+## 🛡️ Security recommendations
 
 - Grant tokens only the read permissions Sled Dog needs.
 - Use a dedicated service account for a shared deployment.
@@ -396,7 +437,7 @@ python -m pip install --upgrade streamlit requests
 - Review Git history before publishing or sharing the repository.
 - Do not print tokens or include them in error messages.
 
-## Running on a different port
+## 🌐 Running on a different port
 
 Use Streamlit's command-line options:
 
@@ -412,7 +453,7 @@ streamlit run app.py --server.address 0.0.0.0
 
 Listening on all interfaces can make the dashboard accessible to other machines. Apply appropriate firewall, authentication, reverse-proxy, and TLS controls before doing this on a shared network.
 
-## Updating Sled Dog
+## 🔄 Updating Sled Dog
 
 After replacing or modifying `app.py`:
 
@@ -423,7 +464,9 @@ After replacing or modifying `app.py`:
 
 During local development, Streamlit detects most source changes and offers to rerun the application automatically.
 
-## Current limitations
+<a id="limitations"></a>
+
+## 🚧 Current limitations
 
 - Optional Jenkins commit lookup depends on an environment-specific URL template; Jenkins installations may require a plugin or proxy endpoint.
 - GitHub and Jenkins calls are performed sequentially, so large result sets may load slowly.
@@ -431,7 +474,7 @@ During local development, Streamlit detects most source changes and offers to re
 - The table does not currently filter by repository, author, or build state.
 - Data is displayed in the browser and is not written to a database.
 
-## Project structure
+## 🗂️ Project structure
 
 ```text
 sled-dog/
