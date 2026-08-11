@@ -20,6 +20,7 @@ import re
 from pathlib import Path
 from typing import Any
 
+import pandas as pd
 import requests
 import streamlit as st
 
@@ -165,6 +166,45 @@ def fetch_jenkins_build_status(url_template: str, sha: str) -> str:
     return jenkins_status(response_json(response, "Jenkins"))
 
 
+def jenkins_status_indicator(status: str) -> str:
+    """Add a readable icon so build state never depends on color alone."""
+    normalized = status.lower()
+    if any(word in normalized for word in ("failure", "failed", "error")):
+        icon = "❌"
+    elif any(word in normalized for word in ("unstable", "warning")):
+        icon = "⚠️"
+    elif any(word in normalized for word in ("success", "passed", "stable")):
+        icon = "✅"
+    elif any(
+        word in normalized
+        for word in ("building", "running", "in progress", "pending", "queued")
+    ):
+        icon = "🔵"
+    elif any(word in normalized for word in ("aborted", "cancelled", "canceled")):
+        icon = "⏹️"
+    else:
+        icon = "⚪"
+    return f"{icon} {status}"
+
+
+def jenkins_status_style(status: str) -> str:
+    """Return high-contrast cell colors for common Jenkins build states."""
+    normalized = status.lower()
+    base = "font-weight: 600; border-radius: 0.35rem;"
+    if any(word in normalized for word in ("failure", "failed", "error")):
+        return f"{base} background-color: #b91c1c; color: #ffffff;"
+    if any(word in normalized for word in ("unstable", "warning")):
+        return f"{base} background-color: #facc15; color: #422006;"
+    if any(word in normalized for word in ("success", "passed", "stable")):
+        return f"{base} background-color: #15803d; color: #ffffff;"
+    if any(
+        word in normalized
+        for word in ("building", "running", "in progress", "pending", "queued")
+    ):
+        return f"{base} background-color: #1d4ed8; color: #ffffff;"
+    return f"{base} background-color: #475569; color: #ffffff;"
+
+
 @st.cache_data(ttl=60, show_spinner=False)
 def dashboard_rows(
     github_api_url: str,
@@ -236,8 +276,13 @@ def main() -> None:
         st.success("No open pull requests found.")
         return
 
+    table = pd.DataFrame(rows)
+    status_column = "Jenkins Build Status"
+    table[status_column] = table[status_column].map(jenkins_status_indicator)
+    styled_table = table.style.map(jenkins_status_style, subset=[status_column])
+
     st.dataframe(
-        rows,
+        styled_table,
         column_config={
             "PR Title": st.column_config.TextColumn("PR Title"),
             "Link": st.column_config.LinkColumn("Link", display_text="Open PR ↗"),
@@ -248,6 +293,10 @@ def main() -> None:
         },
         hide_index=True,
         use_container_width=True,
+    )
+    st.caption(
+        "Jenkins legend: ✅ success · ❌ failure · ⚠️ unstable · "
+        "🔵 building or queued · ⏹️ aborted · ⚪ unavailable"
     )
     st.caption(f"Showing {len(rows)} open pull request(s). Data is cached for 60 seconds.")
 

@@ -32,10 +32,11 @@ Before starting, install:
 - Optionally, a GitHub token for private repositories and higher API rate limits
 - Optionally, access to a Jenkins JSON endpoint that can look up a build using a commit SHA
 
-Sled Dog uses only two runtime Python packages:
+Sled Dog uses three runtime Python packages:
 
 - `streamlit`
 - `requests`
+- `pandas` (used to color Jenkins status cells and also installed by Streamlit)
 
 No additional UI framework is required.
 
@@ -81,7 +82,7 @@ When the environment is active, the terminal prompt will usually begin with `(.v
 
 ```bash
 python -m pip install --upgrade pip
-python -m pip install streamlit requests
+python -m pip install streamlit requests pandas
 ```
 
 On systems where `python` refers to Python 2 or is not available, use `python3` instead.
@@ -89,7 +90,7 @@ On systems where `python` refers to Python 2 or is not available, use `python3` 
 Verify the installation:
 
 ```bash
-python -c "import requests, streamlit; print('Dependencies installed')"
+python -c "import pandas, requests, streamlit; print('Dependencies installed')"
 ```
 
 ## 4. Create a GitHub token (optional)
@@ -291,6 +292,17 @@ The table contains four columns:
 | **Jenkins Build Status** | The normalized status returned by the configured Jenkins endpoint. |
 | **Digital.ai Ticket** | The first matching ticket ID in the title, or `—` if none is found. |
 
+Jenkins states use both color and an icon, making them quick to scan without relying on color alone:
+
+| Indicator | Color | State examples |
+| --- | --- | --- |
+| ✅ | Green | Success, passed, or stable |
+| ❌ | Red | Failure, failed, or request error |
+| ⚠️ | Yellow | Unstable or warning |
+| 🔵 | Blue | Building, running, pending, or queued |
+| ⏹️ | Gray | Aborted or cancelled |
+| ⚪ | Gray | Unknown, not found, or not configured |
+
 Click **Refresh** to clear Sled Dog's 60-second cache and reload the data. Refreshing a large organization may take time because Sled Dog retrieves details for each pull request and, when Jenkins is configured, makes one Jenkins request per pull request.
 
 ## Pull request title convention
@@ -382,7 +394,7 @@ Sled Dog makes one GitHub detail request and one Jenkins request for every open 
 Activate the virtual environment and reinstall the packages:
 
 ```bash
-python -m pip install --upgrade streamlit requests
+python -m pip install --upgrade streamlit requests pandas
 ```
 
 ## Security recommendations
