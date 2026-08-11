@@ -1,0 +1,342 @@
+#!/usr/bin/env python3
+"""Friendly command-line launcher and setup wizard for Sled Dog."""
+
+from __future__ import annotations
+
+import argparse
+import getpass
+import importlib.util
+import os
+import subprocess
+import sys
+from pathlib import Path
+from typing import Optional
+from urllib.error import HTTPError, URLError
+from urllib.parse import quote
+from urllib.request import Request, urlopen
+
+from sled_dog_config import (
+    config_path,
+    delete_secret,
+    keychain_available,
+    load_config,
+    load_secret,
+    save_config,
+    save_secret,
+)
+
+
+APP_DIR = Path(__file__).resolve().parent
+DEFAULT_GITHUB_API_URL = "https://api.github.com"
+BLUE = "\033[34m"
+GREEN = "\033[32m"
+YELLOW = "\033[33m"
+BOLD = "\033[1m"
+RESET = "\033[0m"
+
+
+def color(text: str, ansi: str) -> str:
+    return f"{ansi}{text}{RESET}" if sys.stdout.isatty() else text
+
+
+def heading(title: str) -> None:
+    print(f"\n{color(title, BOLD + BLUE)}")
+
+
+def ask(prompt: str, default: str = "") -> str:
+    suffix = f" [{default}]" if default else ""
+    value = input(f"{prompt}{suffix}: ").strip()
+    return value or default
+
+
+def confirm(prompt: str, default: bool = True) -> bool:
+    suffix = "Y/n" if default else "y/N"
+    while True:
+        answer = input(f"{prompt} [{suffix}]: ").strip().lower()
+        if not answer:
+            return default
+        if answer in {"y", "yes"}:
+            return True
+        if answer in {"n", "no"}:
+            return False
+        print("Please enter y or n.")
+
+
+def github_connection(api_url: str, organization: str, token: str) -> tuple[bool, str]:
+    headers = {
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    request = Request(
+        f"{api_url.rstrip('/')}/orgs/{quote(organization, safe='')}",
+        headers=headers,
+    )
+    try:
+        with urlopen(request, timeout=20) as response:
+            return response.status == 200, f"GitHub returned HTTP {response.status}"
+    except HTTPError as exc:
+        if exc.code == 401:
+            return False, "GitHub rejected the token (HTTP 401)"
+        if exc.code == 403:
+            return False, "GitHub denied access or rate-limited the request (HTTP 403)"
+        if exc.code == 404:
+            return False, "Organization not found or not visible to this token (HTTP 404)"
+        return False, f"GitHub returned HTTP {exc.code}"
+    except URLError as exc:
+        return False, str(exc.reason)
+
+
+def configure() -> bool:
+    current = load_config()
+    print(f"\n{color('🐕  Welcome to Sled Dog', BOLD + BLUE)}")
+    print("Let’s connect your tools. Optional providers can be added later.\n")
+
+    heading("1. GitHub")
+    github_api_url = ask(
+        "GitHub API URL",
+        str(current.get("github_api_url", DEFAULT_GITHUB_API_URL)),
+    )
+    github_org = ask("GitHub organization", str(current.get("github_org", "")))
+    while not github_org:
+        print(color("GitHub organization is required.", YELLOW))
+        github_org = ask("GitHub organization")
+
+    existing_github_token = bool(load_secret("github_token"))
+    use_github_token = confirm(
+        "Authenticate with a GitHub token?", existing_github_token
+    )
+    github_token = ""
+    if use_github_token:
+        token_prompt = "GitHub token (input hidden"
+        if existing_github_token:
+            token_prompt += "; press Enter to keep saved token"
+        github_token = getpass.getpass(token_prompt + "): ").strip()
+        if not github_token and existing_github_token:
+            github_token = load_secret("github_token")
+    else:
+        print("Continuing without a token; only public repositories will be visible.")
+
+    print("Testing GitHub connection... ", end="", flush=True)
+    connected, detail = github_connection(github_api_url, github_org, github_token)
+    print(color("✓ Connected", GREEN) if connected else color(f"✗ {detail}", YELLOW))
+    if not connected and not confirm("Save this GitHub configuration anyway?", False):
+        print("Setup cancelled. Nothing was saved.")
+        return False
+
+    heading("2. Jenkins (optional)")
+    use_jenkins = confirm(
+        "Connect Jenkins?", bool(current.get("jenkins_api_url", ""))
+    )
+    jenkins_api_url = ""
+    jenkins_username = ""
+    jenkins_token = ""
+    if use_jenkins:
+        jenkins_api_url = ask(
+            "Build lookup URL containing {sha}",
+            str(current.get("jenkins_api_url", "")),
+        )
+        while "{sha}" not in jenkins_api_url:
+            print(color("The Jenkins URL must contain {sha}.", YELLOW))
+            jenkins_api_url = ask("Build lookup URL containing {sha}")
+        jenkins_username = ask(
+            "Jenkins username (leave blank for anonymous access)",
+            str(current.get("jenkins_username", "")),
+        )
+        if jenkins_username:
+            existing_jenkins_token = bool(load_secret("jenkins_api_token"))
+            prompt = "Jenkins API token (input hidden"
+            if existing_jenkins_token:
+                prompt += "; press Enter to keep saved token"
+            jenkins_token = getpass.getpass(prompt + "): ").strip()
+            if not jenkins_token and existing_jenkins_token:
+                jenkins_token = load_secret("jenkins_api_token")
+
+    heading("3. Digital.ai ticket detection (optional)")
+    digital_ai_enabled = confirm(
+        "Extract Digital.ai IDs such as B-1234 and S-987 from PR titles?",
+        bool(current.get("digital_ai_enabled", True)),
+    )
+
+    if (github_token or jenkins_token) and not keychain_available():
+        print(
+            color(
+                "Secure token storage is unavailable on this platform; setup was not saved.",
+                YELLOW,
+            )
+        )
+        return False
+
+    config = {
+        "version": 1,
+        "github_api_url": github_api_url,
+        "github_org": github_org,
+        "jenkins_api_url": jenkins_api_url,
+        "jenkins_username": jenkins_username,
+        "digital_ai_enabled": digital_ai_enabled,
+    }
+    save_config(config)
+    if use_github_token and github_token:
+        save_secret("github_token", github_token)
+    else:
+        delete_secret("github_token")
+    if use_jenkins and jenkins_token:
+        save_secret("jenkins_api_token", jenkins_token)
+    else:
+        delete_secret("jenkins_api_token")
+
+    print(f"\n{color('✓ Setup complete', GREEN)}")
+    print(f"Settings: {config_path()}")
+    print("Tokens: macOS Keychain")
+    return True
+
+
+def show_status() -> int:
+    config = load_config()
+    if not config:
+        print("Sled Dog has not been configured yet. Run: ./sled-dog configure")
+        return 1
+    print("🐕 Sled Dog connections\n")
+    print(f"GitHub organization: {config.get('github_org', 'Not configured')}")
+    github_status = "Saved securely" if load_secret("github_token") else "Not configured"
+    jenkins_status = "Connected" if config.get("jenkins_api_url") else "Skipped"
+    digital_ai_status = (
+        "Enabled" if config.get("digital_ai_enabled", True) else "Skipped"
+    )
+    print(f"GitHub token:        {github_status}")
+    print(f"Jenkins:             {jenkins_status}")
+    print(f"Digital.ai IDs:      {digital_ai_status}")
+    print(f"Configuration:      {config_path()}")
+    return 0
+
+
+def dependencies_available(
+    packages: tuple[str, ...], python: Optional[Path] = None
+) -> bool:
+    if python is None:
+        return all(
+            importlib.util.find_spec(package) is not None
+            for package in packages
+        )
+    imports = ", ".join(packages)
+    result = subprocess.run(
+        [
+            str(python),
+            "-c",
+            f"import {imports}",
+        ],
+        check=False,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    return result.returncode == 0
+
+
+def managed_python() -> Path:
+    if sys.platform == "win32":
+        return APP_DIR / ".venv" / "Scripts" / "python.exe"
+    return APP_DIR / ".venv" / "bin" / "python"
+
+
+def ensure_dashboard_dependencies(web: bool = False) -> bool:
+    """Use or create a project-local environment, then restart inside it."""
+    packages = ("streamlit", "requests", "pandas") if web else ("textual", "requests")
+    if dependencies_available(packages):
+        return True
+
+    python = managed_python()
+    if python.is_file() and dependencies_available(packages, python):
+        os.execv(str(python), [str(python), str(Path(__file__).resolve()), *sys.argv[1:]])
+
+    interface = "web dashboard" if web else "terminal dashboard"
+    install_packages = ["streamlit", "requests", "pandas"] if web else ["textual", "requests"]
+    print(f"\nSled Dog needs to install its {interface} components once.")
+    print("They will stay isolated inside the project's .venv directory.")
+    if not confirm("Install them now?", True):
+        print("Installation skipped. Sled Dog cannot launch the dashboard yet.")
+        return False
+
+    if not python.is_file():
+        print("Creating an isolated Python environment...")
+        subprocess.run(
+            [sys.executable, "-m", "venv", str(APP_DIR / ".venv")], check=True
+        )
+    print(f"Installing {interface} components...")
+    subprocess.run(
+        [
+            str(python),
+            "-m",
+            "pip",
+            "install",
+            *install_packages,
+        ],
+        check=True,
+    )
+    os.execv(str(python), [str(python), str(Path(__file__).resolve()), *sys.argv[1:]])
+    return False
+
+
+def launch(web: bool = False) -> int:
+    if not load_config() and not configure():
+        return 1
+    if not ensure_dashboard_dependencies(web):
+        return 1
+    if web:
+        command = [
+            sys.executable,
+            "-m",
+            "streamlit",
+            "run",
+            str(APP_DIR / "app.py"),
+            "--client.toolbarMode",
+            "minimal",
+            "--server.headless",
+            "true",
+        ]
+        try:
+            return subprocess.run(command, check=False).returncode
+        except KeyboardInterrupt:
+            return 130
+
+    from sled_dog_tui import run_terminal_app
+
+    result = run_terminal_app()
+    if result == "configure" and configure():
+        return launch(web=False)
+    return 0
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        prog="sled-dog", description="Configure and launch the Sled Dog dashboard."
+    )
+    parser.add_argument(
+        "--web", action="store_true", help="Launch the optional Streamlit interface."
+    )
+    subparsers = parser.add_subparsers(dest="command")
+    subparsers.add_parser("run", help="Launch the terminal dashboard (default).")
+    subparsers.add_parser("web", help="Launch the optional Streamlit interface.")
+    subparsers.add_parser("configure", help="Run the connection setup wizard.")
+    subparsers.add_parser("status", help="Show configured connections without secrets.")
+    return parser.parse_args()
+
+
+def main() -> int:
+    args = parse_args()
+    try:
+        if args.command == "configure":
+            return 0 if configure() else 1
+        if args.command == "status":
+            return show_status()
+        return launch(web=args.web or args.command == "web")
+    except (EOFError, KeyboardInterrupt):
+        print("\nSetup cancelled.")
+        return 130
+    except (OSError, subprocess.SubprocessError) as exc:
+        print(color(f"Sled Dog could not save or launch: {exc}", YELLOW))
+        return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
