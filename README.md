@@ -1,13 +1,14 @@
 # 🐕 Sled Dog
 
-> **Your pull requests, build health, and Digital.ai tickets—all in one friendly dashboard.**
+> **Your pull requests, build health, and Digital.ai tickets—right inside the terminal.**
 
-Sled Dog is a lightweight, locally run dashboard that gives teams a quick view of open pull requests across an entire GitHub organization.
+Sled Dog is a keyboard-friendly terminal dashboard that gives teams a live view of open pull requests across an entire GitHub organization. An optional Streamlit web interface remains available as a fallback.
 
 | What you see | What it tells you |
 | --- | --- |
 | 📝 **PR Title** | What is changing |
-| 🔗 **Link** | Where to review the pull request |
+| 🔗 **PR actions** | Open or copy the selected pull request link |
+| 🏷️ **Labels** | How the pull request is categorized |
 | 🏗️ **Jenkins Status** | Whether the latest commit is healthy |
 | 🎫 **Digital.ai Ticket** | Which `B-1234` or `S-987` work item the PR belongs to |
 
@@ -39,9 +40,9 @@ When Sled Dog starts, it:
 4. Retrieves the head commit SHA for every pull request.
 5. Optionally detects Digital.ai IDs such as `B-1234` or `S-987`.
 6. Optionally retrieves and normalizes Jenkins build statuses.
-7. Opens the local Streamlit dashboard in your browser.
+7. Opens a full-screen dashboard inside the current terminal.
 
-Results are cached for 60 seconds. The **Refresh** button clears the cache and immediately requests fresh data.
+Results refresh automatically every 60 seconds. Press `r` at any time to refresh immediately.
 
 <a id="requirements"></a>
 
@@ -56,13 +57,12 @@ Before starting, install:
 - Optionally, a GitHub token for private repositories and higher API rate limits
 - Optionally, access to a Jenkins JSON endpoint that can look up a build using a commit SHA
 
-Sled Dog uses three runtime Python packages:
+The default terminal interface uses two direct runtime packages:
 
-- `streamlit`
 - `requests`
-- `pandas` (used to color Jenkins status cells and also installed by Streamlit)
+- `textual`
 
-No additional UI framework is required.
+The optional web interface additionally uses `streamlit` and `pandas`. The launcher installs only what the selected interface needs.
 
 > [!NOTE]
 > New to Python? Follow the setup steps in order. After installation, normal use is simply `./sled-dog`.
@@ -73,7 +73,7 @@ No additional UI framework is required.
 
 ### 1️⃣ Download or clone the project
 
-Place `app.py` in a directory of your choice, then open a terminal in that directory.
+Place the Sled Dog project in a directory of your choice, then open a terminal in that directory.
 
 If this project is stored in Git, clone it and enter the project directory:
 
@@ -101,8 +101,8 @@ That is the entire normal installation flow. On its first run, Sled Dog:
 1. opens the connection wizard;
 2. tests and saves the chosen providers;
 3. offers to create an isolated `.venv` environment;
-4. installs Streamlit, Requests, and pandas inside that environment; and
-5. launches the dashboard.
+4. installs Textual and Requests inside that environment; and
+5. launches the terminal dashboard.
 
 Nothing is installed globally, and future runs reuse the isolated environment automatically.
 
@@ -113,8 +113,10 @@ Most users should skip this section. To manage the environment yourself:
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-python -m pip install streamlit requests pandas
+python -m pip install textual requests
 ```
+
+For optional web-interface development, also install `streamlit` and `pandas`.
 
 ### 4️⃣ Create a GitHub token *(optional)*
 
@@ -321,42 +323,47 @@ After setup, launch Sled Dog from the project directory:
 ./sled-dog
 ```
 
-On the first run, this command automatically starts setup if no saved configuration exists. Later runs go directly to the dashboard. You can also use the explicit command `./sled-dog run`.
+On the first run, this command automatically starts setup if no saved configuration exists. Later runs go directly to the full-screen terminal dashboard. You can also use the explicit command `./sled-dog run`.
 
-For development, Streamlit can still be launched directly:
+Launch the optional web interface when needed:
 
 ```bash
-python -m streamlit run app.py
+./sled-dog --web
 ```
 
-Streamlit will print a local URL, normally:
+The web interface prints a local URL, normally:
 
 ```text
 http://localhost:8501
 ```
 
-Open that URL in a browser. Streamlit usually opens it automatically.
+Open that URL in a browser when needed. Sled Dog runs Streamlit in headless mode, so repeated commands do not automatically create additional browser tabs. `./sled-dog web` is an equivalent command.
 
 To stop the server, return to the terminal and press `Ctrl+C`.
 
-If Streamlit cannot be found, activate the virtual environment and reinstall the dependencies:
+The launcher offers to install missing interface dependencies automatically. Developers can install both interfaces manually with:
 
 ```bash
-python -m pip install streamlit requests pandas
+python -m pip install textual requests streamlit pandas
 ```
 
 <a id="using-the-dashboard"></a>
 
 ## 🖥️ Using the dashboard
 
-The table contains up to four columns. Optional provider columns are hidden when their integrations are skipped:
+The terminal table contains up to five columns. Optional provider columns are hidden when their integrations are skipped:
 
 | Column | Meaning |
 | --- | --- |
 | **PR Title** | The title currently stored in GitHub. |
-| **Link** | A clickable link that opens the pull request. |
+| **Repository** | The GitHub repository containing the pull request. |
+| **Labels** | The labels currently applied to the pull request. |
 | **Jenkins Build Status** | The normalized status returned by Jenkins; hidden when Jenkins is skipped. |
 | **Digital.ai Ticket** | The first matching ticket ID in the title; hidden when detection is skipped. |
+
+In the terminal interface, each label uses an individual fixed-purple pill. The optional Streamlit table keeps labels as plain text because its native data grid cannot reliably wrap each value in a separate pill; selected labels in the Streamlit filter use the same fixed purple accent instead. Label colors are never randomized.
+
+The terminal interface uses one fixed modern slate-gray theme. Theme switching and Textual's command palette are disabled so every user gets the same intentional Sled Dog appearance.
 
 Jenkins states use both color and an icon, making them quick to scan without relying on color alone:
 
@@ -369,14 +376,30 @@ Jenkins states use both color and an icon, making them quick to scan without rel
 | ⏹️ | Gray | Aborted or cancelled |
 | ⚪ | Gray | Unknown, not found, or not configured |
 
-Click **Refresh** to clear Sled Dog's 60-second cache and reload the data. Refreshing a large organization may take time because Sled Dog retrieves details for each pull request and, when Jenkins is configured, makes one Jenkins request per pull request.
+Sled Dog refreshes automatically every 60 seconds. Press `r` to reload immediately. GitHub PR-detail requests and optional Jenkins lookups are performed concurrently to keep refresh time reasonable.
+
+Press `l` to focus the label filter, then enter one or more exact label names separated by commas. By default, Sled Dog shows pull requests containing any entered label. Enable **Require all** to show only pull requests containing every entry. Filtering happens locally and adds no GitHub API requests.
+
+### ⌨️ Terminal controls
+
+| Key | Action |
+| --- | --- |
+| `↑` / `↓` | Select a pull request. |
+| `r` | Refresh immediately. |
+| `l` | Focus the label filter. |
+| `o` | Open the selected PR in a browser. |
+| `y` | Copy the selected PR link on macOS. |
+| `c` | Exit to the connection wizard, then return. |
+| `q` | Quit Sled Dog. |
 
 ### ⌨️ Launcher commands
 
 | Command | Purpose |
 | --- | --- |
-| `./sled-dog` | Configure on first run, then launch the dashboard. |
-| `./sled-dog run` | Launch the dashboard. |
+| `./sled-dog` | Configure on first run, then launch the terminal dashboard. |
+| `./sled-dog run` | Launch the terminal dashboard. |
+| `./sled-dog --web` | Launch the optional Streamlit interface. |
+| `./sled-dog web` | Equivalent web-interface command. |
 | `./sled-dog configure` | Add, skip, or update provider connections. |
 | `./sled-dog status` | Show connection status without revealing tokens. |
 | `./sled-dog --help` | Display command help. |
@@ -465,15 +488,17 @@ Each network request has a 20-second timeout. Check network access, VPN connecti
 
 ### 🐌 The dashboard is slow
 
-Sled Dog makes one GitHub detail request and one Jenkins request for every open pull request. Large organizations or slow Jenkins servers can increase load time. The 60-second cache prevents repeated requests during ordinary Streamlit reruns.
+Sled Dog needs one GitHub detail request and, when configured, one Jenkins request per open pull request. Those lookups run concurrently, but very large organizations or slow Jenkins servers can still increase refresh time. Existing results remain visible while the terminal refreshes.
 
 ### 📦 The dependency import check fails
 
 Activate the virtual environment and reinstall the packages:
 
 ```bash
-python -m pip install --upgrade streamlit requests pandas
+python -m pip install --upgrade textual requests
 ```
+
+For the optional web interface, also install or upgrade `streamlit` and `pandas`.
 
 <a id="security"></a>
 
@@ -483,13 +508,13 @@ python -m pip install --upgrade streamlit requests pandas
 - Use the setup wizard so local tokens are stored in macOS Keychain rather than a plain-text file.
 - Use a dedicated service account for a shared deployment.
 - Store production secrets in the deployment platform's secret manager or environment configuration rather than in a copied `.env` file.
-- Never expose Sled Dog publicly without authentication and network controls. The dashboard reveals repository activity, pull request titles, build results, and internal links.
+- Never expose the optional web interface publicly without authentication and network controls. Sled Dog reveals repository activity, pull request titles, build results, and internal links.
 - Use HTTPS for both GitHub Enterprise and Jenkins.
 - Rotate tokens according to your organization's security policy.
 - Review Git history before publishing or sharing the repository.
 - Do not print tokens or include them in error messages.
 
-## 🌐 Running on a different port
+## 🌐 Running the optional web interface on a different port
 
 Use Streamlit's command-line options:
 
@@ -507,14 +532,14 @@ Listening on all interfaces can make the dashboard accessible to other machines.
 
 ## 🔄 Updating Sled Dog
 
-After replacing or modifying `app.py`:
+After updating Sled Dog:
 
-1. Stop the running Streamlit process with `Ctrl+C`.
-2. Activate the virtual environment.
-3. Update dependencies if necessary.
-4. Start Streamlit again.
+1. Exit with `q` or stop the process with `Ctrl+C`.
+2. Pull or copy the updated source files.
+3. Run `./sled-dog` again.
+4. Allow the launcher to install any newly required dependency.
 
-During local development, Streamlit detects most source changes and offers to rerun the application automatically.
+The terminal interface must be restarted after source changes. The optional Streamlit interface still detects most `app.py` changes automatically.
 
 <a id="limitations"></a>
 
@@ -522,12 +547,10 @@ During local development, Streamlit detects most source changes and offers to re
 
 - This source-based preview still requires Python 3.9 or newer. A standalone executable or Homebrew package is the next step toward a dependency-free user installation.
 - Secure wizard-based token persistence currently targets macOS Keychain. Windows Credential Manager and Linux Secret Service support are planned.
-- The current interface launches in a browser; a full-screen terminal interface is a future option.
 - Optional Jenkins commit lookup depends on an environment-specific URL template; Jenkins installations may require a plugin or proxy endpoint.
-- GitHub and Jenkins calls are performed sequentially, so large result sets may load slowly.
 - Only the first Digital.ai ticket ID found in a title is shown.
-- The table does not currently filter by repository, author, or build state.
-- Data is displayed in the browser and is not written to a database.
+- The table currently filters by labels but not repository, author, or build state.
+- Data is displayed locally and is not written to a database.
 
 ## 🗂️ Project structure
 
@@ -535,9 +558,11 @@ During local development, Streamlit detects most source changes and offers to re
 sled-dog/
 ├── .streamlit/
 │   └── config.toml      # Local Streamlit interface settings
-├── sled-dog             # Setup wizard and application launcher
+├── sled-dog             # Setup wizard and interface launcher
 ├── sled_dog_config.py   # Shared settings and macOS Keychain integration
-├── app.py               # Streamlit dashboard
+├── sled_dog_core.py     # Shared GitHub, Jenkins, and ticket data layer
+├── sled_dog_tui.py      # Default full-screen terminal interface
+├── app.py               # Optional Streamlit web interface
 ├── README.md            # Setup and usage documentation
 └── .env                 # Optional development override; do not commit it
 ```

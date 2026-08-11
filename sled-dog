@@ -10,6 +10,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+from typing import Optional
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote
 from urllib.request import Request, urlopen
@@ -210,17 +211,20 @@ def show_status() -> int:
     return 0
 
 
-def dashboard_dependencies_available(python: Path | None = None) -> bool:
+def dependencies_available(
+    packages: tuple[str, ...], python: Optional[Path] = None
+) -> bool:
     if python is None:
         return all(
             importlib.util.find_spec(package) is not None
-            for package in ("streamlit", "requests", "pandas")
+            for package in packages
         )
+    imports = ", ".join(packages)
     result = subprocess.run(
         [
             str(python),
             "-c",
-            "import pandas, requests, streamlit",
+            f"import {imports}",
         ],
         check=False,
         stdout=subprocess.DEVNULL,
@@ -235,16 +239,19 @@ def managed_python() -> Path:
     return APP_DIR / ".venv" / "bin" / "python"
 
 
-def ensure_dashboard_dependencies() -> bool:
+def ensure_dashboard_dependencies(web: bool = False) -> bool:
     """Use or create a project-local environment, then restart inside it."""
-    if dashboard_dependencies_available():
+    packages = ("streamlit", "requests", "pandas") if web else ("textual", "requests")
+    if dependencies_available(packages):
         return True
 
     python = managed_python()
-    if python.is_file() and dashboard_dependencies_available(python):
+    if python.is_file() and dependencies_available(packages, python):
         os.execv(str(python), [str(python), str(Path(__file__).resolve()), *sys.argv[1:]])
 
-    print("\nSled Dog needs to install its dashboard components once.")
+    interface = "web dashboard" if web else "terminal dashboard"
+    install_packages = ["streamlit", "requests", "pandas"] if web else ["textual", "requests"]
+    print(f"\nSled Dog needs to install its {interface} components once.")
     print("They will stay isolated inside the project's .venv directory.")
     if not confirm("Install them now?", True):
         print("Installation skipped. Sled Dog cannot launch the dashboard yet.")
@@ -255,16 +262,14 @@ def ensure_dashboard_dependencies() -> bool:
         subprocess.run(
             [sys.executable, "-m", "venv", str(APP_DIR / ".venv")], check=True
         )
-    print("Installing Streamlit and dashboard dependencies...")
+    print(f"Installing {interface} components...")
     subprocess.run(
         [
             str(python),
             "-m",
             "pip",
             "install",
-            "streamlit",
-            "requests",
-            "pandas",
+            *install_packages,
         ],
         check=True,
     )
@@ -272,32 +277,46 @@ def ensure_dashboard_dependencies() -> bool:
     return False
 
 
-def launch() -> int:
+def launch(web: bool = False) -> int:
     if not load_config() and not configure():
         return 1
-    if not ensure_dashboard_dependencies():
+    if not ensure_dashboard_dependencies(web):
         return 1
-    command = [
-        sys.executable,
-        "-m",
-        "streamlit",
-        "run",
-        str(APP_DIR / "app.py"),
-        "--client.toolbarMode",
-        "minimal",
-    ]
-    try:
-        return subprocess.run(command, check=False).returncode
-    except KeyboardInterrupt:
-        return 130
+    if web:
+        command = [
+            sys.executable,
+            "-m",
+            "streamlit",
+            "run",
+            str(APP_DIR / "app.py"),
+            "--client.toolbarMode",
+            "minimal",
+            "--server.headless",
+            "true",
+        ]
+        try:
+            return subprocess.run(command, check=False).returncode
+        except KeyboardInterrupt:
+            return 130
+
+    from sled_dog_tui import run_terminal_app
+
+    result = run_terminal_app()
+    if result == "configure" and configure():
+        return launch(web=False)
+    return 0
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog="sled-dog", description="Configure and launch the Sled Dog dashboard."
     )
+    parser.add_argument(
+        "--web", action="store_true", help="Launch the optional Streamlit interface."
+    )
     subparsers = parser.add_subparsers(dest="command")
-    subparsers.add_parser("run", help="Launch the dashboard (default).")
+    subparsers.add_parser("run", help="Launch the terminal dashboard (default).")
+    subparsers.add_parser("web", help="Launch the optional Streamlit interface.")
     subparsers.add_parser("configure", help="Run the connection setup wizard.")
     subparsers.add_parser("status", help="Show configured connections without secrets.")
     return parser.parse_args()
@@ -310,7 +329,7 @@ def main() -> int:
             return 0 if configure() else 1
         if args.command == "status":
             return show_status()
-        return launch()
+        return launch(web=args.web or args.command == "web")
     except (EOFError, KeyboardInterrupt):
         print("\nSetup cancelled.")
         return 130

@@ -15,6 +15,22 @@ KEYCHAIN_SERVICE = "com.sled-dog.cli"
 SECRET_NAMES = ("github_token", "jenkins_api_token")
 
 
+def load_dotenv(path: str = ".env") -> None:
+    """Load simple development overrides without another dependency."""
+    env_path = Path(path)
+    if not env_path.is_file():
+        return
+    for raw_line in env_path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip().strip("'").strip('"')
+        if key:
+            os.environ.setdefault(key, value)
+
+
 def config_directory() -> Path:
     system = platform.system()
     if system == "Darwin":
@@ -131,6 +147,7 @@ def bool_setting(config: dict[str, Any], env_name: str, config_name: str) -> boo
 
 def resolved_settings() -> dict[str, Any]:
     """Return effective settings, with environment variables taking precedence."""
+    load_dotenv()
     config = load_config()
     return {
         "github_api_url": setting(config, "GITHUB_API_URL", "github_api_url"),
