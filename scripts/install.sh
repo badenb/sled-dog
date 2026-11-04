@@ -27,14 +27,20 @@ else
   echo 'A SHA-256 tool (sha256sum or shasum) is required to verify the download.' >&2; exit 1
 fi
 [ "${#expected}" -eq 64 ] && [ "$expected" = "$actual" ] || { echo 'Checksum mismatch. Nothing installed.' >&2; exit 1; }
-tar -xzf "$work/$asset" -C "$work" sled-dog
+tar -xzf "$work/$asset" -C "$work"
 "$work/sled-dog" --version
 install_dir=${SLED_DOG_INSTALL_DIR:-"$HOME/.local/bin"}
 mkdir -p "$install_dir"
-# Stage and rename on the destination filesystem so an existing install stays intact on failure.
-staged=$(mktemp "$install_dir/.sled-dog.XXXXXX")
-cp "$work/sled-dog" "$staged"
-chmod 755 "$staged"
+# Keep the bundled runtime next to its executable; atomically switch the public symlink.
+versions="$install_dir/.sled-dog-versions"
+mkdir -p "$versions"
+version_dir=$(mktemp -d "$versions/version.XXXXXX")
+cp "$work/sled-dog" "$version_dir/sled-dog"
+chmod 755 "$version_dir/sled-dog"
+if [ -d "$work/_internal" ]; then cp -R "$work/_internal" "$version_dir/_internal"; fi
+if [ -f "$work/THIRD-PARTY-NOTICES.txt" ]; then cp "$work/THIRD-PARTY-NOTICES.txt" "$version_dir/"; fi
+staged="$version_dir/link"
+ln -s "$version_dir/sled-dog" "$staged"
 mv -f "$staged" "$install_dir/sled-dog"
 printf '\nInstalled to %s/sled-dog\n' "$install_dir"
 case ":$PATH:" in

@@ -3,6 +3,7 @@ import json
 import os
 import re
 import sys
+from datetime import datetime, timezone
 import tempfile
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -124,3 +125,19 @@ class Secrets:
             self.backend.delete_password('com.sled-dog.cli.v2', self.key(host, account))
         except Exception:
             raise Failure('Cannot remove native credentials. Check Keychain and retry.', 3) from None
+
+def now():
+    return datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
+
+
+def component(value):
+    if not re.fullmatch(r'[A-Za-z0-9_.-]+', value) or value in ('.', '..'):
+        raise Failure('Invalid owner or repository name.', 2)
+    return value
+
+
+def repository(value):
+    parts = value.split('/')
+    if len(parts) != 2:
+        raise Failure('Repository must be OWNER/REPO.', 2)
+    return tuple(component(x) for x in parts)

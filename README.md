@@ -230,3 +230,20 @@ python scripts/build_release.py --target macos-arm64
 Other targets are `macos-x86_64`, `windows-x86_64`, `linux-x86_64`, and `linux-arm64`. Output is in `release/`; extracted executables do not need the build environment. Each build runs `--version`, `--help`, and `doctor --json` against the actual frozen executable, and archives third-party license notices alongside it.
 
 The Standalone releases workflow builds all five targets for PRs and manual runs and uploads artifacts for review. A `v*` tag builds all targets and creates a **draft** GitHub release containing the archives, individual SHA-256 files, and installers. It never automatically publishes a release. Before publishing, validate desktop credential login/logout, supported OS versions, authenticated GitHub/Enterprise behavior, and OS code-signing/notarization requirements. Apple Developer ID/notarization and Windows signing credentials are not configured by this PR; do not advertise warning-free downloaded binaries until signed artifacts are produced and tested.
+
+
+### Startup packaging (1.0.1)
+
+macOS/Linux archives contain `sled-dog` and a sibling `_internal/` runtime directory. Keep them together when extracting a direct download. The installer preserves this layout behind a single `sled-dog` command. This avoids unpacking the runtime for every invocation. Windows currently retains its single-file package.
+
+For a Homebrew formula targeting 1.0.1 or newer, install both items into `libexec` and link the executable:
+
+```ruby
+def install
+  libexec.install "sled-dog", "_internal"
+  bin.install_symlink libexec/"sled-dog"
+  prefix.install "THIRD-PARTY-NOTICES.txt"
+end
+```
+
+The published 1.0.0 formula continues using its original single-file layout until the patch release is published and the tap's URL and checksums are updated.
