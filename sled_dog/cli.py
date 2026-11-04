@@ -46,6 +46,7 @@ def parser():
     p.add_argument('--org')
     p.add_argument('--repo')
     p.add_argument('--limit', type=int, default=30)
+    p.add_argument('--no-checks', action='store_true', help='Skip build lookups for a faster list')
     p.add_argument('--state', choices=['open','closed','all'], default='open')
     for name in ('view','checks'):
         p = pr.add_parser(name, parents=[common])
@@ -181,13 +182,19 @@ def run(args, config, secrets_factory=Secrets, github_factory=GitHub):
             rows, extra = github.search(identity, args)
             meta.update(extra)
             errors = [] if meta['complete'] else [{'message':'GitHub search returned incomplete results. Narrow the query.'}]
+            if not args.no_checks:
+                rows, build_errors = github.builds(rows)
+                errors.extend(build_errors)
+            meta['complete'] = not errors
             return envelope(rows, meta, errors), 0 if meta['complete'] else 4
         _, owner, repo, number = selected
         meta.update({'repository':f'{owner}/{repo}', 'number':number})
         if args.action == 'view':
             data, detail_warnings = github.detail(owner, repo, number)
             meta['warnings'] = detail_warnings
-            return envelope(data, meta), 0
+            rows, build_errors = github.builds([data])
+            meta['complete'] = not build_errors
+            return envelope(rows[0], meta, build_errors), 4 if build_errors else 0
         data, errors = github.checks(owner, repo, number)
         if data['stale']:
             errors.append({'message':'PR head changed during retrieval. Rerun checks.'})
@@ -213,6 +220,20 @@ def pr_card(row):
     if row.get('updated_at'):
         status.append('  updated ' + safe(row['updated_at']), style='dim')
     parts = [Text(safe(row.get('title') or 'Untitled pull request'), style='bold'), Text(''), status]
+    build = row.get('build')
+    if build:
+        build_state = build['state']
+        badge_style = {'success':'bold black on green', 'failure':'bold white on red',
+                       'pending':'bold black on yellow', 'stale':'bold black on yellow',
+                       'unavailable':'bold white on bright_black', 'none':'dim'}.get(build_state, 'bold cyan')
+        captions = {'success':'PASSING', 'failure':'FAILING', 'pending':'RUNNING / QUEUED',
+                    'none':'NO CHECKS', 'unavailable':'UNAVAILABLE', 'stale':'STALE — RERUN', 'mixed':'MIXED'}
+        line = Text('Build  ', style='bold')
+        line.append(' ' + captions.get(build_state, build_state.upper()) + ' ', style=badge_style)
+        counts = build.get('counts') or {}
+        if counts:
+            line.append('  ' + ' · '.join(f'{count} {name}' for name, count in sorted(counts.items())), style='dim')
+        parts.extend([Text(''), line])
     labels = Text()
     for label in row.get('labels') or []:
         color = (row.get('label_colors') or {}).get(label)

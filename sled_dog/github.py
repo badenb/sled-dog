@@ -2,6 +2,8 @@
 import os
 import re
 import ssl
+from collections import Counter
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 
 import httpx
@@ -154,6 +156,29 @@ class GitHub:
             data['reviews'] = None
             warnings.append('Review summary unavailable.')
         return data, warnings
+
+    def builds(self, pull_requests):
+        """Enrich only displayed PRs, with bounded concurrency and isolated errors."""
+        def load(row):
+            try:
+                owner, repo = repository(row['repository'])
+                data, errors = self.checks(owner, repo, int(row['number']))
+                if data['stale']:
+                    errors.append({'message':'PR head changed. Rerun to refresh build status.'})
+                summary = {'state':data['state'], 'head_sha':data['head_sha'],
+                           'counts':dict(Counter(check['state'] for check in data['checks'])),
+                           'total':len(data['checks']), 'fetched_at':now(), 'errors':errors}
+            except Failure as exc:
+                errors = [{'message':str(exc)}]
+                summary = {'state':'unavailable', 'head_sha':None, 'counts':{},
+                           'total':None, 'fetched_at':now(), 'errors':errors}
+            return dict(row, build=summary)
+        with ThreadPoolExecutor(max_workers=4) as executor:
+            rows = list(executor.map(load, pull_requests))
+        errors = [{'repository':row['repository'], 'number':row['number'],
+                   'message':'Build status incomplete or unavailable. See build.errors.'}
+                  for row in rows if row['build']['errors']]
+        return rows, errors
 
     def checks(self, owner, repo, number):
         pr_path = f'/repos/{owner}/{repo}/pulls/{number}'

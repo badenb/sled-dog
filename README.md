@@ -68,7 +68,9 @@ Put command options after the leaf command (`list`, `view`, `checks`, `login`, e
 
 A PR URL selects its host; a conflicting `--host` is an error. Short references use the selected host. An invocation uses one account on one host; there is no implicit cross-account fallback or aggregation.
 
-Lists show repository, number, title, author, state, and URL without fetching every PR's details. Details show the description, branches, changes, head SHA, labels, and latest submitted review per reviewer. Review summaries are observations, not a branch-protection approval decision.
+Lists show repository, number, title, author, state, labels, URL, and a colored build summary. Build lookups run for displayed PRs only, with at most four concurrent PR lookups. Use `--no-checks` for a faster list without those extra API requests. Details show the description, branches, changes, head SHA, labels, and latest submitted review per reviewer. Review summaries are observations, not a branch-protection approval decision.
+
+PR cards include passing, failing, running/queued, no checks, unavailable, stale, or mixed build status, with counts by check outcome. The same summary appears in PR details. JSON exposes it as `build`, including the head SHA, observation time, counts, and any errors. Unavailable or stale build data makes the overall result partial (exit 4) while preserving the PR cards.
 
 Checks combine GitHub check runs and legacy commit statuses for the captured head SHA, including CI providers such as Jenkins that publish statuses to GitHub. The CLI rechecks the head after retrieval and marks changed-head results stale. Missing access and no checks are distinct from success. Raw states and conclusions remain in JSON. Results describe observed head checks, not every required check, merge queue, or mergeability condition. Direct Jenkins endpoint lookup is deferred.
 

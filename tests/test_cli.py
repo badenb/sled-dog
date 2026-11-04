@@ -291,5 +291,58 @@ class CardTests(unittest.TestCase):
         self.assertTrue(all(len(line) <= 48 for line in plain.splitlines()))
 
 
+class BuildTests(unittest.TestCase):
+    def test_build_summary_preserves_partial_and_stale_results(self):
+        github = GitHub.__new__(GitHub)
+        def checks(owner, repo, number):
+            if number == 3:
+                raise Failure('No repository access.')
+            return {'state':'stale' if number == 2 else 'success', 'stale':number == 2,
+                    'head_sha':'a'*40, 'checks':[{'state':'success'}, {'state':'success'}]}, []
+        github.checks = checks
+        rows, errors = github.builds([{'repository':'acme/app','number':n} for n in (1,2,3)])
+        self.assertEqual(rows[0]['build']['state'],'success')
+        self.assertEqual(rows[0]['build']['counts'],{'success':2})
+        self.assertEqual(rows[0]['build']['total'],2)
+        self.assertEqual(rows[1]['build']['state'],'stale')
+        self.assertEqual(rows[2]['build']['state'],'unavailable')
+        self.assertEqual(len(errors),2)
+        self.assertEqual([row['number'] for row in rows],[1,2,3])
+
+    def test_list_can_skip_builds_and_partial_builds_set_exit_code(self):
+        class Client(FakeGitHub):
+            calls = 0
+            def search(self, login, args):
+                return [{'repository':'acme/app','number':1}], {'complete':True}
+            def builds(self, rows):
+                Client.calls += 1
+                return [dict(rows[0], build={'state':'unavailable'})], [{'message':'Build unavailable.'}]
+        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {'SLED_DOG_TOKEN':'alice'}):
+            config = Config(Path(directory)/'config.json')
+            args = parser().parse_args(['pr','list','--mine','--host','github.com'])
+            result, code = run(args, config, FakeSecrets, Client)
+            self.assertEqual(code,4)
+            self.assertFalse(result['meta']['complete'])
+            self.assertEqual(result['data'][0]['build']['state'],'unavailable')
+            args.no_checks = True
+            result, code = run(args, config, FakeSecrets, Client)
+            self.assertEqual(code,0)
+            self.assertEqual(Client.calls,1)
+            self.assertNotIn('build',result['data'][0])
+
+    def test_build_badges_are_literal_and_colorful(self):
+        from rich.console import Console
+        from sled_dog.cli import pr_card
+        output = io.StringIO()
+        Console(file=output, width=72, height=25, force_terminal=True, no_color=False,
+                _environ={'TERM':'xterm-256color'}).print(pr_card({
+                    'repository':'acme/app','number':1,'title':'Example','state':'open',
+                    'build':{'state':'failure','counts':{'success':2,'failure':1}}}))
+        self.assertIn('FAILING', output.getvalue())
+        self.assertIn('1 failure', output.getvalue())
+        self.assertIn('2 success', output.getvalue())
+        self.assertIn('41m',output.getvalue())
+
+
 if __name__ == '__main__':
     unittest.main()
