@@ -49,6 +49,7 @@ def parser():
     p.add_argument('--org')
     p.add_argument('--repo')
     p.add_argument('--limit', type=int, default=30)
+    p.add_argument('--cards', action='store_true', help='Use full cards for the review-request queue')
     p.add_argument('--no-checks', action='store_true', help='Skip build lookups for a faster list')
     p.add_argument('--state', choices=['open','closed','all'], default='open')
     for name in ('view','checks'):
@@ -197,6 +198,7 @@ def run(args, config, secrets_factory=Secrets, github_factory=None):
             config.save()
             return envelope({'action':args.action, 'account':identity}, meta), 0
         if args.action == 'list':
+            meta['view'] = 'reviews' if args.review_requested and not args.cards else 'cards'
             rows, extra = github.search(identity, args)
             meta.update(extra)
             errors = [] if meta['complete'] else [{'message':'GitHub search returned incomplete results. Narrow the query.'}]
@@ -242,6 +244,66 @@ def pr_age(created_at, at=None):
     return f'{seconds // 86400}d'
 
 
+def eastern_time(value):
+    from zoneinfo import ZoneInfo
+    try:
+        stamp = datetime.fromisoformat(value.replace('Z', '+00:00'))
+        if stamp.tzinfo is None:
+            return 'unknown'
+        return stamp.astimezone(ZoneInfo('America/New_York')).strftime('%b %d %H:%M %Z')
+    except (AttributeError, TypeError, ValueError):
+        return 'unknown'
+
+
+def review_queue(rows, console):
+    """Compact review rows grouped by repository, with a narrow-terminal fallback."""
+    from rich.table import Table
+    from rich.text import Text
+    groups = {}
+    for row in rows:
+        groups.setdefault(row.get('repository') or 'Unknown repository', []).append(row)
+    console.print('Review requests · Updated times: Eastern (EST/EDT)', style='dim')
+    for repo, items in groups.items():
+        console.print(safe(repo), style='bold cyan')
+        table = Table(box=None, padding=(0, 1), expand=True, show_edge=False)
+        narrow = console.width < 100
+        table.add_column('Pull request', ratio=3, min_width=18)
+        if not narrow:
+            table.add_column('Build', min_width=7)
+            table.add_column('Reviews / comments', ratio=2, min_width=15)
+            table.add_column('Changes', min_width=8)
+            table.add_column('Age / updated (Eastern)', min_width=17)
+        for row in items:
+            title = Text(f"#{row['number']} ", style='bold magenta')
+            title.append(safe(row.get('title') or 'Untitled pull request'), style='bold')
+            labels = row.get('labels') or []
+            title.append('\n' + safe(' · '.join(labels)) if labels else '\nNo labels', style='magenta' if labels else 'dim')
+            build = (row.get('build') or {}).get('state', 'not fetched')
+            style = {'success':'green','failure':'red','pending':'yellow','stale':'yellow'}.get(build, 'dim')
+            approvals = row.get('approval_count')
+            comments = row.get('comment_count')
+            review = Text(f"{approvals if approvals is not None else '?'} approvals · {comments if comments is not None else '?'} comments")
+            reviewers = row.get('reviews')
+            review.append('\n' + safe(', '.join(r['reviewer'] + ' (' + r['state'].lower().replace('_', ' ') + ')' for r in reviewers)) if reviewers else '\n' + ('Reviews unavailable' if reviewers is None else 'No reviews yet'), style='dim')
+            changes = Text('+' + str(row['additions'] if row.get('additions') is not None else '?'), style='green')
+            changes.append(' / -' + str(row['deletions'] if row.get('deletions') is not None else '?'), style='red')
+            age = 'Age ' + pr_age(row.get('created_at'))
+            updated = eastern_time(row.get('updated_at'))
+            if narrow:
+                title.append('\n' + age + ' · Build ' + build, style=style)
+                title.append(' · ')
+                title.append_text(changes)
+                title.append('\n')
+                title.append_text(review)
+                title.append('\nUpdated ' + updated + ' (Eastern)', style='dim')
+                table.add_row(title)
+            else:
+                table.add_row(title, Text(build.upper(), style=style), review, changes, Text(age+'\n'+updated, style='dim'))
+        console.print(table)
+        console.print()
+    console.print('Use pr view OWNER/REPO#NUMBER for details and URL, or --cards for full cards.', style='dim')
+
+
 def pr_card(row):
     """Build literal, wrapping terminal cards; never interpret provider markup."""
     from rich.console import Group
@@ -257,7 +319,7 @@ def pr_card(row):
     status.append('  @' + safe(row.get('author') or 'unknown'), style='cyan')
     status.append('  Age ' + pr_age(row.get('created_at')), style='bold yellow')
     if row.get('updated_at'):
-        status.append('  updated ' + safe(row['updated_at']), style='dim')
+        status.append('  updated ' + eastern_time(row['updated_at']) + ' (Eastern)', style='dim')
     parts = [Text(safe(row.get('html_url') or ''), style='cyan'), Text(''), status]
     if 'additions' in row or 'approval_count' in row:
         def count(value):
@@ -326,7 +388,9 @@ def render(result, color='auto'):
     if isinstance(data, list):
         if not data:
             console.print('No results.')
-        for row in data:
+        if meta.get('view') == 'reviews' and data:
+            review_queue(data, console)
+        for row in ([] if meta.get('view') == 'reviews' else data):
             if 'title' in row:
                 console.print(pr_card(row))
             else:
