@@ -197,11 +197,52 @@ def run(args, config, secrets_factory=Secrets, github_factory=GitHub):
         github.close()
 
 
+def pr_card(row):
+    """Build literal, wrapping terminal cards; never interpret provider markup."""
+    from rich.console import Group
+    from rich.panel import Panel
+    from rich.text import Text
+
+    state = 'merged' if row.get('merged') else 'draft' if row.get('draft') else row.get('state') or 'unknown'
+    state_style = {'open':'bold black on green', 'closed':'bold white on red',
+                   'merged':'bold white on magenta', 'draft':'bold black on yellow'}.get(state, 'bold white on bright_black')
+    border = {'open':'green', 'closed':'red', 'merged':'magenta', 'draft':'yellow'}.get(state, 'cyan')
+    status = Text()
+    status.append(' ' + state.upper() + ' ', style=state_style)
+    status.append('  @' + safe(row.get('author') or 'unknown'), style='cyan')
+    if row.get('updated_at'):
+        status.append('  updated ' + safe(row['updated_at']), style='dim')
+    parts = [Text(safe(row.get('title') or 'Untitled pull request'), style='bold'), Text(''), status]
+    labels = Text()
+    for label in row.get('labels') or []:
+        color = (row.get('label_colors') or {}).get(label)
+        if not isinstance(color, str) or not re.fullmatch('[0-9a-fA-F]{6}', color):
+            color = '6d28d9'
+        red, green, blue = (int(color[i:i+2], 16) for i in (0,2,4))
+        foreground = 'black' if 0.2126*red + 0.7152*green + 0.0722*blue > 155 else 'white'
+        if labels:
+            labels.append('  ')
+        labels.append(' ' + safe(label) + ' ', style=f'bold {foreground} on #{color}')
+    parts.extend([Text(''), labels if labels else Text('No labels', style='dim')])
+    if 'head_branch' in row:
+        branches = Text(safe(row.get('head_branch') or '?'), style='cyan')
+        branches.append(' → ', style='dim')
+        branches.append(safe(row.get('base_branch') or '?'), style='magenta')
+        changes = Text(f"+{row.get('additions', '?')}", style='bold green')
+        changes.append('  ')
+        changes.append(f"-{row.get('deletions', '?')}", style='bold red')
+        changes.append('  head ' + safe(row.get('head_sha') or 'unknown'), style='dim')
+        parts.extend([Text(''), branches, changes])
+    parts.extend([Text(''), Text(safe(row.get('html_url') or ''), style='cyan')])
+    heading = Text(safe(f"{row.get('repository', '')} #{row['number']}"), style='bold cyan')
+    return Panel(Group(*parts), title=heading, title_align='left', border_style=border, padding=(1,2))
+
+
 def render(result, color='auto'):
     from rich.console import Console
-    console = Console(highlight=False, markup=False, force_terminal=True if color == 'always' else False if color == 'never' or os.getenv('NO_COLOR') is not None else None)
+    console = Console(highlight=False, markup=False, no_color=False if color == 'always' else None, force_terminal=True if color == 'always' else False if color == 'never' or os.getenv('NO_COLOR') is not None else None)
     meta, data = result['meta'], result['data']
-    console.print('Sled Dog', style='bold magenta')
+    console.rule('Sled Dog', style='magenta', align='left')
     if meta.get('host'):
         console.print(safe(f"{meta['host']} / {meta.get('account') or 'no active account'}"), style='dim')
     console.print()
@@ -210,27 +251,16 @@ def render(result, color='auto'):
             console.print('No results.')
         for row in data:
             if 'title' in row:
-                console.print(safe(f"{row.get('repository', '')} #{row['number']}  {row['title']}"), style='bold')
-                console.print(safe(f"  {row.get('state', 'unknown').upper()} · {row.get('author') or 'unknown author'}"))
-                console.print(safe('  ' + (row.get('html_url') or '')))
+                console.print(pr_card(row))
             else:
                 console.print(safe(f"{row['host']} / {row['account']}"), style='bold')
                 console.print(safe(f"  {'active' if row['active'] else 'saved'} · {row['credential_source']}"))
             console.print()
     elif isinstance(data, dict):
         if 'title' in data:
-            console.print(safe(f"{data.get('repository', '')} #{data['number']}  {data['title']}"), style='bold')
-            state = 'MERGED' if data.get('merged') else (data.get('state') or 'unknown').upper()
-            if data.get('draft'):
-                state += ' · DRAFT'
-            console.print(safe(f"{state} · {data.get('author') or 'unknown author'}"))
-            console.print(safe(data.get('html_url') or ''), style='cyan')
+            console.print(pr_card(data))
             console.print()
-            console.print(safe(f"{data.get('head_branch') or '?'} → {data.get('base_branch') or '?'}"))
-            console.print(safe(f"+{data.get('additions', '?')} / -{data.get('deletions', '?')} · head {data.get('head_sha') or 'unknown'}"), style='dim')
-            if data.get('labels'):
-                console.print(safe('Labels: ' + ', '.join(data['labels'])))
-            console.print()
+            console.print('Description', style='bold magenta')
             console.print(safe(data.get('body') or 'No description.'))
             console.print()
             reviews = data.get('reviews')

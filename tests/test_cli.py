@@ -269,5 +269,27 @@ class InteractiveLoginTests(unittest.TestCase):
             self.assertFalse(config.path.exists())
 
 
+class CardTests(unittest.TestCase):
+    def test_card_wraps_labels_and_uses_safe_provider_colors(self):
+        from rich.console import Console
+        from sled_dog.cli import pr_card
+        row = {'repository':'acme/service', 'number':42, 'title':'[bold]Literal title with a long description that wraps',
+               'state':'open', 'author':'alice', 'labels':['bug', 'needs review'],
+               'label_colors':{'bug':'d73a4a','needs review':'invalid[markup]'},
+               'html_url':'https://github.com/acme/service/pull/42'}
+        output = io.StringIO()
+        console = Console(file=output, width=48, height=25, force_terminal=True, color_system='truecolor', no_color=False, _environ={'TERM':'xterm-256color'})
+        console.print(pr_card(row))
+        value = output.getvalue()
+        self.assertIn('48;2;215;58;74', value)
+        self.assertIn('[bold]Literal',value)
+        self.assertIn('needs review',value)
+        self.assertNotIn('invalid[markup]',value)
+        self.assertNotIn('\x1b[?1049',value)
+        self.assertNotIn('\x1b[2J',value)
+        plain = safe(value)
+        self.assertTrue(all(len(line) <= 48 for line in plain.splitlines()))
+
+
 if __name__ == '__main__':
     unittest.main()

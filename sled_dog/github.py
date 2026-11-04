@@ -131,7 +131,8 @@ class GitHub:
         return {key: row.get(key) for key in ('number', 'title', 'html_url', 'state', 'draft', 'updated_at')} | {
             'repository': '/'.join(str(row.get('html_url', '')).split('/')[3:5]),
             'author': (row.get('user') or {}).get('login'),
-            'labels': [x.get('name') for x in row.get('labels', [])]}
+            'labels': [x.get('name') for x in row.get('labels', [])],
+            'label_colors': {x.get('name'): x.get('color') for x in row.get('labels', []) if x.get('name')}}
 
     def detail(self, owner, repo, number):
         path = f'/repos/{owner}/{repo}/pulls/{number}'
