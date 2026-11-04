@@ -31,6 +31,10 @@ jobs:
           RELEASE_TAG: ${{ github.ref_name }}
         run: python -c "import os; from sled_dog import __version__; assert os.environ['RELEASE_TAG'] == 'v' + __version__, 'Tag must match package version'"
       - run: python scripts/build_release.py --target ${{ matrix.target }}
+      - name: Test Windows installer against built archive
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./scripts/test_install_windows.ps1
       - uses: actions/upload-artifact@v4
         with:
           name: sled-dog-${{ matrix.target }}

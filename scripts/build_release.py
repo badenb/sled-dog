@@ -41,12 +41,12 @@ def main():
             if 'license' in str(file).lower() or 'copying' in str(file).lower():
                 path = dist.locate_file(file)
                 if path.is_file():
-                    notices.append(path.read_text(errors='replace'))
+                    notices.append(path.read_text(encoding='utf-8', errors='replace'))
     python_license = next((path for path in (Path(sys.base_prefix, 'LICENSE.txt'), Path(sysconfig.get_path('stdlib'), 'LICENSE.txt')) if path.is_file()), None)
     if python_license is None:
         raise SystemExit('Cannot find the bundled Python license; release archive was not created.')
-    notices.append('\nPython license\n' + python_license.read_text())
-    licenses.write_text('\n'.join(notices))
+    notices.append('\nPython license\n' + python_license.read_text(encoding='utf-8'))
+    licenses.write_text('\n'.join(notices), encoding='utf-8')
     if system == 'windows':
         archive = out / (name + '.zip')
         with zipfile.ZipFile(archive, 'w', zipfile.ZIP_DEFLATED) as stream:
