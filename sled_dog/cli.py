@@ -241,7 +241,8 @@ def pr_card(row):
     status.append('  Age ' + pr_age(row.get('created_at')), style='bold yellow')
     if row.get('updated_at'):
         status.append('  updated ' + safe(row['updated_at']), style='dim')
-    parts = [Text(safe(row.get('title') or 'Untitled pull request'), style='bold'), Text(''), status]
+    parts = [Text(safe(row.get('html_url') or ''), style='cyan'),
+             Text(safe(f"{row.get('repository', '')} #{row['number']}"), style='dim'), Text(''), status]
     if 'additions' in row or 'approval_count' in row:
         def count(value):
             return '?' if value is None else str(value)
@@ -294,9 +295,8 @@ def pr_card(row):
         branches.append(safe(row.get('base_branch') or '?'), style='magenta')
         changes = Text('Head ' + safe(row.get('head_sha') or 'unknown'), style='dim')
         parts.extend([Text(''), branches, changes])
-    parts.extend([Text(''), Text(safe(row.get('html_url') or ''), style='cyan')])
-    heading = Text(safe(f"{row.get('repository', '')} #{row['number']}"), style='bold cyan')
-    return Panel(Group(*parts), title=heading, title_align='left', border_style=border, padding=(1,2))
+    heading = Text(safe(row.get('title') or 'Untitled pull request'), style='bold')
+    return Panel(Group(*parts), title=heading, title_align='left', border_style=border, padding=(0,2))
 
 
 def render(result, color='auto'):
