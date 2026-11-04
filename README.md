@@ -8,7 +8,18 @@ Sled Dog 1.0 replaces the full-screen dashboard launcher with a read-only CLI. I
 
 Standalone releases bundle Python and the application libraries. End users do **not** need Python, pip, pipx, uv, Git, Homebrew, or virtual-environment activation.
 
-**Release status:** standalone packaging and installers are in this PR. The download commands below become usable after the first release is published; they do not download PR artifacts. Until then, use the source setup below or download a platform artifact from the “Standalone releases” Actions run and extract it.
+### Homebrew on macOS
+
+```sh
+brew install badenb/tap/sled-dog
+sled-dog --version
+sled-dog auth login --host github.com
+sled-dog pr list --mine
+```
+
+The [Homebrew tap](https://github.com/badenb/homebrew-tap) selects the Apple Silicon or Intel executable and verifies its checksum. Requires macOS 15+ and a working Homebrew installation. Homebrew itself may require current Apple Command Line Tools; if it reports outdated tools, update them through System Settings → General → Software Update. Python and application libraries are bundled.
+
+The [1.0.0 early-access release](https://github.com/badenb/sled-dog/releases/tag/v1.0.0) is published. Developer ID signing/notarization and Windows signing are not configured. Direct downloads may be subject to OS approval or workplace restrictions.
 
 ### macOS and Linux
 
