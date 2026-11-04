@@ -76,7 +76,7 @@ PR cards include passing, failing, running/queued, no checks, unavailable, stale
 
 Checks combine GitHub check runs and legacy commit statuses for the captured head SHA, including CI providers such as Jenkins that publish statuses to GitHub. The CLI rechecks the head after retrieval and marks changed-head results stale. Missing access and no checks are distinct from success. Raw states and conclusions remain in JSON. Results describe observed head checks, not every required check, merge queue, or mergeability condition. Direct Jenkins endpoint lookup is deferred.
 
-PR titles sit in the top card border, with the PR URL directly underneath and repository/number on the next line. PR lists and details use bordered cards with colored state badges, GitHub-colored label chips, cyan repository links, and branch/change summaries. Missing labels are shown explicitly. Cards wrap to fit narrow terminals.
+PR titles sit in the top card border in bold magenta, prefixed with the PR number (for example, `#42 Fix retries`), with the PR URL directly underneath. PR lists and details use bordered cards with colored state badges, GitHub-colored label chips, cyan repository links, and branch/change summaries. Missing labels are shown explicitly. Cards wrap to fit narrow terminals.
 
 All output stays in terminal scrollback. Commands have no alternate screen, screen clearing, automatic refresh, implicit pager, or background service. Output wraps on narrow terminals. Use `--color never`, `--color always`, or `NO_COLOR`; redirected output is plain by default. Untrusted PR text is rendered literally with terminal controls removed.
 

@@ -238,7 +238,8 @@ class StorageTests(unittest.TestCase):
         value = output.getvalue()
         self.assertIn('[bold]literal',value)
         self.assertNotIn('\x1b',value)
-        self.assertIn('a/b #1',value)
+        self.assertIn('#1',value)
+        self.assertNotIn('a/b #1',value)
 
 
 class InteractiveLoginTests(unittest.TestCase):
