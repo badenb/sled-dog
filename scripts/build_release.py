@@ -23,7 +23,7 @@ def main():
     # Explicit imports prevent frozen discovery from requiring third-party backend plugins.
     backend = {'macos':'keyring.backends.macOS', 'windows':'keyring.backends.Windows', 'linux':'keyring.backends.SecretService'}[system]
     subprocess.run([sys.executable, '-m', 'PyInstaller', '--clean', '--noconfirm', '--onefile' if system == 'windows' else '--onedir',
-        '--distpath','dist/standalone', '--name','sled-dog','--paths','.', '--copy-metadata','keyring', '--collect-submodules',backend,
+        '--distpath','dist/standalone', '--name','sled-dog','--paths','.', '--collect-all','tzdata', '--copy-metadata','keyring', '--collect-submodules',backend,
         '--hidden-import',backend, 'packaging/entry.py'], check=True, env=dict(os.environ, PYINSTALLER_CONFIG_DIR=str(Path('build/pyinstaller-cache').resolve())))
     bundle = Path('dist/standalone/sled-dog')
     binary = Path('dist/standalone/sled-dog.exe') if system == 'windows' else bundle / 'sled-dog'
