@@ -6,6 +6,7 @@ import os
 import re
 import sys
 import warnings
+from datetime import datetime, timezone
 from urllib.parse import urlsplit
 
 from .config import Config, Failure, Secrets, api_base, host_name
@@ -182,6 +183,8 @@ def run(args, config, secrets_factory=Secrets, github_factory=GitHub):
             rows, extra = github.search(identity, args)
             meta.update(extra)
             errors = [] if meta['complete'] else [{'message':'GitHub search returned incomplete results. Narrow the query.'}]
+            rows, detail_errors = github.card_details(rows)
+            errors.extend(detail_errors)
             if not args.no_checks:
                 rows, build_errors = github.builds(rows)
                 errors.extend(build_errors)
@@ -193,8 +196,9 @@ def run(args, config, secrets_factory=Secrets, github_factory=GitHub):
             data, detail_warnings = github.detail(owner, repo, number)
             meta['warnings'] = detail_warnings
             rows, build_errors = github.builds([data])
-            meta['complete'] = not build_errors
-            return envelope(rows[0], meta, build_errors), 4 if build_errors else 0
+            errors = [{'message':warning} for warning in detail_warnings] + build_errors
+            meta['complete'] = not errors
+            return envelope(rows[0], meta, errors), 4 if errors else 0
         data, errors = github.checks(owner, repo, number)
         if data['stale']:
             errors.append({'message':'PR head changed during retrieval. Rerun checks.'})
@@ -202,6 +206,23 @@ def run(args, config, secrets_factory=Secrets, github_factory=GitHub):
         return envelope(data, meta, errors), 4 if errors else 0
     finally:
         github.close()
+
+
+def pr_age(created_at, at=None):
+    try:
+        created = datetime.fromisoformat(created_at.replace('Z', '+00:00'))
+        if created.tzinfo is None:
+            return 'unknown'
+        seconds = max(0, int(((at or datetime.now(timezone.utc)) - created).total_seconds()))
+    except (TypeError, ValueError, AttributeError):
+        return 'unknown'
+    if seconds < 60:
+        return '<1m'
+    if seconds < 3600:
+        return f'{seconds // 60}m'
+    if seconds < 86400:
+        return f'{seconds // 3600}h'
+    return f'{seconds // 86400}d'
 
 
 def pr_card(row):
@@ -217,9 +238,31 @@ def pr_card(row):
     status = Text()
     status.append(' ' + state.upper() + ' ', style=state_style)
     status.append('  @' + safe(row.get('author') or 'unknown'), style='cyan')
+    status.append('  Age ' + pr_age(row.get('created_at')), style='bold yellow')
     if row.get('updated_at'):
         status.append('  updated ' + safe(row['updated_at']), style='dim')
     parts = [Text(safe(row.get('title') or 'Untitled pull request'), style='bold'), Text(''), status]
+    if 'additions' in row or 'approval_count' in row:
+        def count(value):
+            return '?' if value is None else str(value)
+        stats = Text('+' + count(row.get('additions')), style='bold green')
+        stats.append('  -' + count(row.get('deletions')), style='bold red')
+        stats.append('   ' + count(row.get('approval_count')) + (' approval' if row.get('approval_count') == 1 else ' approvals'), style='bold green')
+        stats.append('   ' + count(row.get('comment_count')) + (' comment' if row.get('comment_count') == 1 else ' comments'), style='cyan')
+        parts.extend([Text(''), stats])
+        reviews = row.get('reviews')
+        reviewers = Text('Reviewed by  ', style='dim')
+        if reviews is None:
+            reviewers.append('unavailable', style='yellow')
+        elif not reviews:
+            reviewers.append('no reviews yet', style='dim')
+        else:
+            for index, review in enumerate(reviews):
+                if index:
+                    reviewers.append(' · ')
+                style = {'APPROVED':'green', 'CHANGES_REQUESTED':'red', 'DISMISSED':'yellow'}.get(review['state'], 'cyan')
+                reviewers.append(safe(review['reviewer']) + ' (' + safe(review['state'].lower().replace('_', ' ')) + ')', style=style)
+        parts.append(reviewers)
     build = row.get('build')
     if build:
         build_state = build['state']
@@ -249,10 +292,7 @@ def pr_card(row):
         branches = Text(safe(row.get('head_branch') or '?'), style='cyan')
         branches.append(' → ', style='dim')
         branches.append(safe(row.get('base_branch') or '?'), style='magenta')
-        changes = Text(f"+{row.get('additions', '?')}", style='bold green')
-        changes.append('  ')
-        changes.append(f"-{row.get('deletions', '?')}", style='bold red')
-        changes.append('  head ' + safe(row.get('head_sha') or 'unknown'), style='dim')
+        changes = Text('Head ' + safe(row.get('head_sha') or 'unknown'), style='dim')
         parts.extend([Text(''), branches, changes])
     parts.extend([Text(''), Text(safe(row.get('html_url') or ''), style='cyan')])
     heading = Text(safe(f"{row.get('repository', '')} #{row['number']}"), style='bold cyan')

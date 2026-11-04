@@ -130,7 +130,7 @@ class GitHub:
     @staticmethod
     def summary(row):
         # Do not follow repository_url or pull_request.url from search responses.
-        return {key: row.get(key) for key in ('number', 'title', 'html_url', 'state', 'draft', 'updated_at')} | {
+        return {key: row.get(key) for key in ('number', 'title', 'html_url', 'state', 'draft', 'created_at', 'updated_at')} | {
             'repository': '/'.join(str(row.get('html_url', '')).split('/')[3:5]),
             'author': (row.get('user') or {}).get('login'),
             'labels': [x.get('name') for x in row.get('labels', [])],
@@ -142,20 +142,44 @@ class GitHub:
         data = self.summary(row)
         data.update({'body': row.get('body'), 'merged': row.get('merged'), 'mergeable': row.get('mergeable'),
             'head_sha': row.get('head', {}).get('sha'), 'head_branch': row.get('head', {}).get('ref'),
-            'base_branch': row.get('base', {}).get('ref'), 'additions': row.get('additions'), 'deletions': row.get('deletions')})
+            'base_branch': row.get('base', {}).get('ref'), 'additions': row.get('additions'), 'deletions': row.get('deletions'),
+            'discussion_comments': row.get('comments'), 'inline_comments': row.get('review_comments'),
+            'comment_count': (row['comments'] + row['review_comments']) if isinstance(row.get('comments'), int) and isinstance(row.get('review_comments'), int) else None})
         warnings = []
         try:
             reviews = self.pages(path + '/reviews')
             latest = {}
-            for review in reviews:
+            for review in sorted(reviews, key=lambda item: (item.get('submitted_at') or '', item.get('id') or 0)):
                 user = (review.get('user') or {}).get('login')
                 if user and review.get('state') != 'PENDING':
+                    # A comment-only review does not revoke a prior approval or change request.
+                    if review.get('state') == 'COMMENTED' and user in latest:
+                        continue
                     latest[user] = {'reviewer': user, 'state': review.get('state'), 'submitted_at': review.get('submitted_at')}
-            data['reviews'] = list(latest.values())
+            data['reviews'] = sorted(latest.values(), key=lambda item: item['reviewer'].lower())
+            data['approval_count'] = sum(review['state'] == 'APPROVED' for review in data['reviews'])
         except Failure:
             data['reviews'] = None
+            data['approval_count'] = None
             warnings.append('Review summary unavailable.')
         return data, warnings
+
+    def card_details(self, pull_requests):
+        """Fetch changes, comments and reviews for the displayed queue only."""
+        def load(row):
+            try:
+                owner, repo = repository(row['repository'])
+                detail, warnings = self.detail(owner, repo, row['number'])
+                return dict(row, **{key:value for key,value in detail.items() if key != 'body'}, detail_warnings=warnings)
+            except Failure as exc:
+                return dict(row, additions=None, deletions=None, reviews=None, approval_count=None,
+                            comment_count=None, discussion_comments=None, inline_comments=None,
+                            detail_warnings=[str(exc)])
+        with ThreadPoolExecutor(max_workers=4) as executor:
+            rows = list(executor.map(load, pull_requests))
+        errors = [{'repository':row['repository'], 'number':row['number'],
+                   'message':message} for row in rows for message in row['detail_warnings']]
+        return rows, errors
 
     def builds(self, pull_requests):
         """Enrich only displayed PRs, with bounded concurrency and isolated errors."""

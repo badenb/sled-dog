@@ -314,6 +314,8 @@ class BuildTests(unittest.TestCase):
             calls = 0
             def search(self, login, args):
                 return [{'repository':'acme/app','number':1}], {'complete':True}
+            def card_details(self, rows):
+                return rows, []
             def builds(self, rows):
                 Client.calls += 1
                 return [dict(rows[0], build={'state':'unavailable'})], [{'message':'Build unavailable.'}]
@@ -342,6 +344,73 @@ class BuildTests(unittest.TestCase):
         self.assertIn('1 failure', output.getvalue())
         self.assertIn('2 success', output.getvalue())
         self.assertIn('41m',output.getvalue())
+
+
+class ReviewDetailTests(unittest.TestCase):
+    def test_review_decisions_counts_comments_and_changes(self):
+        github = GitHub.__new__(GitHub)
+        github.get = lambda path: {'number':42,'html_url':'https://github.com/acme/app/pull/42',
+            'created_at':'2026-11-01T12:00:00Z','additions':123,'deletions':45,
+            'comments':3,'review_comments':7,'head':{},'base':{},'labels':[{'name':'bug','color':'d73a4a'}]}
+        def review(user, state, day, id):
+            return {'id':id,'user':{'login':user},'state':state,'submitted_at':f'2026-11-0{day}T12:00:00Z'}
+        github.pages = lambda path: [
+            review('alice','APPROVED',1,1), review('alice','COMMENTED',2,2),
+            review('bob','APPROVED',1,3), review('bob','CHANGES_REQUESTED',2,4),
+            review('carol','DISMISSED',1,5), review('dave','PENDING',1,6),
+            review('eve','COMMENTED',1,7), review('frank','APPROVED',1,8),
+            review('frank','APPROVED',2,9)]
+        data, warnings = github.detail('acme','app',42)
+        self.assertEqual(warnings,[])
+        self.assertEqual(data['approval_count'],2)
+        self.assertEqual(data['comment_count'],10)
+        self.assertEqual(data['discussion_comments'],3)
+        self.assertEqual(data['inline_comments'],7)
+        self.assertEqual((data['additions'],data['deletions']),(123,45))
+        states = {r['reviewer']:r['state'] for r in data['reviews']}
+        self.assertEqual(states['alice'],'APPROVED')
+        self.assertEqual(states['bob'],'CHANGES_REQUESTED')
+        self.assertNotIn('dave',states)
+        self.assertEqual(data['labels'],['bug'])
+        rows, errors = github.card_details([{'repository':'acme/app','number':42}])
+        self.assertEqual(errors,[])
+        self.assertEqual(rows[0]['approval_count'],2)
+        self.assertNotIn('body',rows[0])
+
+    def test_unavailable_reviews_are_unknown_not_zero(self):
+        github = GitHub.__new__(GitHub)
+        github.get = lambda path: {'number':42,'html_url':'https://github.com/acme/app/pull/42','head':{},'base':{}}
+        def unavailable(path):
+            raise Failure('Denied.')
+        github.pages = unavailable
+        rows, errors = github.card_details([{'repository':'acme/app','number':42}])
+        self.assertIsNone(rows[0]['approval_count'])
+        self.assertIsNone(rows[0]['reviews'])
+        self.assertIsNone(rows[0]['comment_count'])
+        self.assertTrue(errors)
+
+    def test_age_uses_creation_time_and_handles_invalid_values(self):
+        from datetime import datetime, timezone
+        from sled_dog.cli import pr_age
+        at = datetime(2026,11,4,12,tzinfo=timezone.utc)
+        self.assertEqual(pr_age('2026-11-01T12:00:00Z',at),'3d')
+        self.assertEqual(pr_age('2026-11-04T11:00:00Z',at),'1h')
+        self.assertEqual(pr_age('2026-11-04T11:55:00Z',at),'5m')
+        self.assertEqual(pr_age('2026-11-05T12:00:00Z',at),'<1m')
+        for value in (None,'bad','2026-11-01'):
+            self.assertEqual(pr_age(value,at),'unknown')
+
+    def test_card_shows_changes_reviews_comments_age_and_labels(self):
+        from rich.console import Console
+        from sled_dog.cli import pr_card
+        output = io.StringIO()
+        Console(file=output,width=120,height=25,force_terminal=False).print(pr_card({
+            'repository':'acme/app','number':42,'title':'Example','created_at':'2026-11-01T12:00:00Z',
+            'additions':123,'deletions':45,'approval_count':1,'comment_count':10,
+            'reviews':[{'reviewer':'alice','state':'APPROVED'}], 'labels':['bug']}))
+        text = output.getvalue()
+        for expected in ('+123','-45','1 approval','10 comments','alice (approved)','Age','bug'):
+            self.assertIn(expected,text)
 
 
 if __name__ == '__main__':
