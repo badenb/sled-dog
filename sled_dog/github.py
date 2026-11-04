@@ -8,17 +8,8 @@ from datetime import datetime, timezone
 
 import httpx
 
-from .config import Failure
+from .config import Failure, now, component, repository
 
-
-def now():
-    return datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
-
-
-def component(value):
-    if not re.fullmatch(r'[A-Za-z0-9_.-]+', value) or value in ('.', '..'):
-        raise Failure('Invalid owner or repository name.', 2)
-    return value
 
 
 class GitHub:
@@ -234,10 +225,3 @@ class GitHub:
         states = {row['state'] for row in rows}
         aggregate = 'unavailable' if errors else 'none' if not rows else 'failure' if states & {'failure','timed_out','action_required'} else 'pending' if 'pending' in states else 'success' if states == {'success'} else 'mixed'
         return {'head_sha':sha, 'stale':stale, 'state': 'stale' if stale else aggregate, 'checks':rows}, errors
-
-
-def repository(value):
-    parts = value.split('/')
-    if len(parts) != 2:
-        raise Failure('Repository must be OWNER/REPO.', 2)
-    return tuple(component(x) for x in parts)

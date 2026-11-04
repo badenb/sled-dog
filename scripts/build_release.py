@@ -22,10 +22,11 @@ def main():
         parser.error('Build must run on the requested native OS and architecture.')
     # Explicit imports prevent frozen discovery from requiring third-party backend plugins.
     backend = {'macos':'keyring.backends.macOS', 'windows':'keyring.backends.Windows', 'linux':'keyring.backends.SecretService'}[system]
-    subprocess.run([sys.executable, '-m', 'PyInstaller', '--clean', '--noconfirm', '--onefile',
-        '--name','sled-dog','--paths','.', '--copy-metadata','keyring', '--collect-submodules',backend,
+    subprocess.run([sys.executable, '-m', 'PyInstaller', '--clean', '--noconfirm', '--onefile' if system == 'windows' else '--onedir',
+        '--distpath','dist/standalone', '--name','sled-dog','--paths','.', '--copy-metadata','keyring', '--collect-submodules',backend,
         '--hidden-import',backend, 'packaging/entry.py'], check=True, env=dict(os.environ, PYINSTALLER_CONFIG_DIR=str(Path('build/pyinstaller-cache').resolve())))
-    binary = Path('dist') / ('sled-dog.exe' if system == 'windows' else 'sled-dog')
+    bundle = Path('dist/standalone/sled-dog')
+    binary = Path('dist/standalone/sled-dog.exe') if system == 'windows' else bundle / 'sled-dog'
     subprocess.run([str(binary.resolve()), '--version'], check=True)
     subprocess.run([str(binary.resolve()), '--help'], check=True)
     # Exercise HTTP/TLS imports, Rich, config, and the selected native backend without secrets/network.
@@ -56,6 +57,7 @@ def main():
         archive = out / (name + '.tar.gz')
         with tarfile.open(archive, 'w:gz') as stream:
             stream.add(binary, arcname=binary.name)
+            stream.add(bundle / '_internal', arcname='_internal')
             stream.add(licenses, arcname=licenses.name)
     digest = hashlib.sha256(archive.read_bytes()).hexdigest()
     (out / (archive.name + '.sha256')).write_text(f'{digest}  {archive.name}\n')

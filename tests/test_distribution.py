@@ -52,6 +52,9 @@ class DistributionTests(unittest.TestCase):
                 archive = fixtures/'fixture.tar.gz'
                 with tarfile.open(archive,'w:gz') as stream:
                     stream.add(binary,arcname='sled-dog')
+                    runtime = root/'runtime.txt'
+                    runtime.write_text('bundled runtime fixture')
+                    stream.add(runtime,arcname='_internal/runtime.txt')
                 digest = hashlib.sha256(archive.read_bytes()).hexdigest() if valid else '0'*64
                 (fixtures/'fixture.sha256').write_text(digest+'  fixture.tar.gz\n')
                 tools = root/'tools'
@@ -79,6 +82,7 @@ esac
                 if valid:
                     self.assertEqual(result.returncode,0,result.stderr)
                     self.assertTrue((dest/'sled-dog').is_file())
+                    self.assertEqual(((dest/'sled-dog').resolve().parent/'_internal/runtime.txt').read_text(),'bundled runtime fixture')
                     profile = home/'.zshrc'
                     subprocess.run(['/bin/sh','-n',str(profile)],check=True)
                     resolved = subprocess.run(['/bin/sh','-c','. "$HOME/.zshrc"; command -v sled-dog'],env=env,capture_output=True,text=True,check=True)
@@ -89,3 +93,22 @@ esac
                     self.assertNotEqual(result.returncode,0)
                     self.assertIn('Checksum mismatch',result.stderr)
                     self.assertFalse((dest/'sled-dog').exists())
+
+
+class StartupTests(unittest.TestCase):
+    def test_local_status_does_not_import_http_or_credentials(self):
+        code = """
+import contextlib, io, sys, tempfile
+from pathlib import Path
+from unittest.mock import patch
+from sled_dog.cli import main
+from sled_dog.config import Config
+with tempfile.TemporaryDirectory() as directory:
+    with patch('sled_dog.cli.Config', return_value=Config(Path(directory)/'config.json')):
+        with contextlib.redirect_stdout(io.StringIO()):
+            assert main(['auth','status','--json']) == 0
+assert 'httpx' not in sys.modules
+assert 'keyring' not in sys.modules
+assert 'sled_dog.github' not in sys.modules
+"""
+        subprocess.run([sys.executable,'-c',code],check=True,cwd=ROOT)

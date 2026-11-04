@@ -10,8 +10,7 @@ from datetime import datetime, timezone
 from urllib.parse import urlsplit
 
 from . import __version__
-from .config import Config, Failure, Secrets, api_base, host_name
-from .github import GitHub, component, now, repository
+from .config import Config, Failure, Secrets, api_base, host_name, component, now, repository
 
 
 def safe(value):
@@ -80,7 +79,7 @@ def envelope(data=None, meta=None, errors=None):
     return {'schema_version':1, 'data':data, 'meta':meta or {}, 'errors':errors or []}
 
 
-def run(args, config, secrets_factory=Secrets, github_factory=GitHub):
+def run(args, config, secrets_factory=Secrets, github_factory=None):
     if args.command == 'doctor':
         import ssl
         import httpx
@@ -178,6 +177,9 @@ def run(args, config, secrets_factory=Secrets, github_factory=GitHub):
         base = api_base(host, entry.get('api_base'))
     if not token:
         raise Failure('No token available. Run sled-dog auth login --host HOST.', 3)
+    if github_factory is None:
+        from .github import GitHub
+        github_factory = GitHub
     github = github_factory(base, token)
     try:
         identity = github.identity()
