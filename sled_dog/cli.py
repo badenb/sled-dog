@@ -252,53 +252,50 @@ def eastern_time(value):
         return 'unknown'
 
 
-def review_queue(rows, console):
-    """Compact review rows grouped by repository, with a narrow-terminal fallback."""
-    from rich.table import Table
+def label_chips(row):
     from rich.text import Text
-    groups = {}
+    labels = Text()
+    for label in row.get('labels') or []:
+        color = (row.get('label_colors') or {}).get(label)
+        if not isinstance(color, str) or not re.fullmatch('[0-9a-fA-F]{6}', color):
+            color = '6d28d9'
+        red, green, blue = (int(color[i:i+2], 16) for i in (0,2,4))
+        foreground = 'black' if 0.2126*red + 0.7152*green + 0.0722*blue > 155 else 'white'
+        if labels:
+            labels.append('  ')
+        labels.append(' ' + safe(label) + ' ', style=f'bold {foreground} on #{color}')
+    return labels if labels else Text('No labels', style='dim')
+
+
+def pr_stats(row):
+    from rich.text import Text
+    def count(value):
+        return '?' if value is None else str(value)
+    stats = Text('+' + count(row.get('additions')), style='bold green')
+    stats.append('  -' + count(row.get('deletions')), style='bold red')
+    stats.append('   ' + count(row.get('approval_count')) + (' approval' if row.get('approval_count') == 1 else ' approvals'), style='bold green')
+    stats.append('   ' + count(row.get('comment_count')) + (' comment' if row.get('comment_count') == 1 else ' comments'), style='cyan')
+    return stats
+
+
+def review_card(row):
+    """Four content lines, with wrapping rather than truncation on narrow terminals."""
+    from rich.console import Group
+    from rich.panel import Panel
+    from rich.text import Text
+    title = Text(safe(f"#{row['number']} {row.get('title') or 'Untitled pull request'}"), style='bold magenta')
+    title.append(' (', style='dim')
+    title.append(safe(row.get('author') or 'unknown author'), style='cyan')
+    title.append(', ' + pr_age(row.get('created_at')) + ' old', style='yellow')
+    title.append(')', style='dim')
+    border = 'yellow' if row.get('draft') else 'green' if row.get('state', 'open') == 'open' else 'red'
+    return Panel(Group(title, Text(safe(row.get('html_url') or 'URL unavailable'), style='cyan'),
+                       pr_stats(row), label_chips(row)), border_style=border, padding=(0, 1))
+
+
+def review_queue(rows, console):
     for row in rows:
-        groups.setdefault(row.get('repository') or 'Unknown repository', []).append(row)
-    console.print('Review requests · Updated times: Eastern (EST/EDT)', style='dim')
-    for repo, items in groups.items():
-        console.print(safe(repo), style='bold cyan')
-        table = Table(box=None, padding=(0, 1), expand=True, show_edge=False)
-        narrow = console.width < 100
-        table.add_column('Pull request', ratio=3, min_width=18)
-        if not narrow:
-            table.add_column('Build', min_width=7)
-            table.add_column('Reviews / comments', ratio=2, min_width=15)
-            table.add_column('Changes', min_width=8)
-            table.add_column('Age / updated (Eastern)', min_width=17)
-        for row in items:
-            title = Text(f"#{row['number']} ", style='bold magenta')
-            title.append(safe(row.get('title') or 'Untitled pull request'), style='bold')
-            labels = row.get('labels') or []
-            title.append('\n' + safe(' · '.join(labels)) if labels else '\nNo labels', style='magenta' if labels else 'dim')
-            build = (row.get('build') or {}).get('state', 'not fetched')
-            style = {'success':'green','failure':'red','pending':'yellow','stale':'yellow'}.get(build, 'dim')
-            approvals = row.get('approval_count')
-            comments = row.get('comment_count')
-            review = Text(f"{approvals if approvals is not None else '?'} approvals · {comments if comments is not None else '?'} comments")
-            reviewers = row.get('reviews')
-            review.append('\n' + safe(', '.join(r['reviewer'] + ' (' + r['state'].lower().replace('_', ' ') + ')' for r in reviewers)) if reviewers else '\n' + ('Reviews unavailable' if reviewers is None else 'No reviews yet'), style='dim')
-            changes = Text('+' + str(row['additions'] if row.get('additions') is not None else '?'), style='green')
-            changes.append(' / -' + str(row['deletions'] if row.get('deletions') is not None else '?'), style='red')
-            age = 'Age ' + pr_age(row.get('created_at'))
-            updated = eastern_time(row.get('updated_at'))
-            if narrow:
-                title.append('\n' + age + ' · Build ' + build, style=style)
-                title.append(' · ')
-                title.append_text(changes)
-                title.append('\n')
-                title.append_text(review)
-                title.append('\nUpdated ' + updated + ' (Eastern)', style='dim')
-                table.add_row(title)
-            else:
-                table.add_row(title, Text(build.upper(), style=style), review, changes, Text(age+'\n'+updated, style='dim'))
-        console.print(table)
-        console.print()
-    console.print('Use pr view OWNER/REPO#NUMBER for details and URL, or --cards for full cards.', style='dim')
+        console.print(review_card(row))
 
 
 def pr_card(row):
@@ -319,12 +316,7 @@ def pr_card(row):
         status.append('  updated ' + eastern_time(row['updated_at']) + ' (Eastern)', style='dim')
     parts = [Text(safe(row.get('html_url') or ''), style='cyan'), Text(''), status]
     if 'additions' in row or 'approval_count' in row:
-        def count(value):
-            return '?' if value is None else str(value)
-        stats = Text('+' + count(row.get('additions')), style='bold green')
-        stats.append('  -' + count(row.get('deletions')), style='bold red')
-        stats.append('   ' + count(row.get('approval_count')) + (' approval' if row.get('approval_count') == 1 else ' approvals'), style='bold green')
-        stats.append('   ' + count(row.get('comment_count')) + (' comment' if row.get('comment_count') == 1 else ' comments'), style='cyan')
+        stats = pr_stats(row)
         parts.extend([Text(''), stats])
         reviews = row.get('reviews')
         reviewers = Text('Reviewed by  ', style='dim')
@@ -353,16 +345,7 @@ def pr_card(row):
         if counts:
             line.append('  ' + ' · '.join(f'{count} {name}' for name, count in sorted(counts.items())), style='dim')
         parts.extend([Text(''), line])
-    labels = Text()
-    for label in row.get('labels') or []:
-        color = (row.get('label_colors') or {}).get(label)
-        if not isinstance(color, str) or not re.fullmatch('[0-9a-fA-F]{6}', color):
-            color = '6d28d9'
-        red, green, blue = (int(color[i:i+2], 16) for i in (0,2,4))
-        foreground = 'black' if 0.2126*red + 0.7152*green + 0.0722*blue > 155 else 'white'
-        if labels:
-            labels.append('  ')
-        labels.append(' ' + safe(label) + ' ', style=f'bold {foreground} on #{color}')
+    labels = label_chips(row)
     parts.extend([Text(''), labels if labels else Text('No labels', style='dim')])
     if 'head_branch' in row:
         branches = Text(safe(row.get('head_branch') or '?'), style='cyan')
