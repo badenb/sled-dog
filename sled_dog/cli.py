@@ -202,11 +202,8 @@ def run(args, config, secrets_factory=Secrets, github_factory=None):
             rows, extra = github.search(identity, args)
             meta.update(extra)
             errors = [] if meta['complete'] else [{'message':'GitHub search returned incomplete results. Narrow the query.'}]
-            rows, detail_errors = github.card_details(rows)
-            errors.extend(detail_errors)
-            if not args.no_checks:
-                rows, build_errors = github.builds(rows)
-                errors.extend(build_errors)
+            rows, enrichment_errors = github.enrich(rows, include_checks=not args.no_checks)
+            errors.extend(enrichment_errors)
             meta['complete'] = not errors
             return envelope(rows, meta, errors), 0 if meta['complete'] else 4
         _, owner, repo, number = selected

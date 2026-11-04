@@ -137,16 +137,15 @@ class Tests(unittest.TestCase):
         self.assertTrue(meta['provider_ceiling'])
         self.assertEqual(rows[0]['repository'], 'a/b')
 
-    def test_team_reviews_union_and_deduplication(self):
-        queries = []
+    def test_review_search_includes_teams_without_enumerating_memberships(self):
+        calls = []
         def handler(request):
-            if request.url.path.endswith('/user/teams'):
-                return httpx.Response(200,json=[{'organization':{'login':'acme'},'slug':'devs'}])
-            queries.append(request.url.params['q'])
+            calls.append(request.url.path)
+            self.assertEqual(request.url.params['q'], 'is:pr is:open review-requested:alice')
             return httpx.Response(200,json={'total_count':1,'items':[{'number':1,'html_url':'https://host/a/b/pull/1'}]})
         rows, meta = self.client(handler).search('alice', self.args('pr list --review-requested'))
         self.assertEqual(len(rows),1)
-        self.assertTrue(any('team-review-requested:acme/devs' in q for q in queries))
+        self.assertEqual(calls,['/api/v3/search/issues'])
         self.assertTrue(meta['complete'])
 
     def test_checks_latest_status_and_stale_head(self):
@@ -316,8 +315,8 @@ class BuildTests(unittest.TestCase):
             calls = 0
             def search(self, login, args):
                 return [{'repository':'acme/app','number':1}], {'complete':True}
-            def card_details(self, rows):
-                return rows, []
+            def enrich(self, rows, include_checks=True):
+                return self.builds(rows) if include_checks else (rows, [])
             def builds(self, rows):
                 Client.calls += 1
                 return [dict(rows[0], build={'state':'unavailable'})], [{'message':'Build unavailable.'}]
@@ -417,3 +416,65 @@ class ReviewDetailTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class QueuePerformanceTests(unittest.TestCase):
+    def client(self, handler):
+        github = GitHub('https://enterprise.test/api/v3','fixture-token')
+        github.client.close()
+        github.client = httpx.Client(transport=httpx.MockTransport(handler))
+        self.addCleanup(github.close)
+        return github
+
+    def test_fifteen_prs_reuse_head_sha_and_bound_network_concurrency(self):
+        import threading
+        import time
+        lock = threading.Lock()
+        active = peak = calls = 0
+        def handler(request):
+            nonlocal active, peak, calls
+            with lock:
+                active += 1
+                peak = max(peak,active)
+                calls += 1
+            try:
+                time.sleep(0.005)
+                path = request.url.path
+                if path.endswith('/reviews'):
+                    data = [{'id':1,'user':{'login':'alice'},'state':'APPROVED','submitted_at':'2026-11-04T12:00:00Z'}]
+                elif path.endswith('/check-runs'):
+                    data = {'check_runs':[{'id':1,'name':'ci','status':'completed','conclusion':'success'}]}
+                elif path.endswith('/statuses'):
+                    data = []
+                else:
+                    number = int(path.rsplit('/',1)[1])
+                    data = {'number':number,'title':'PR','html_url':f'https://enterprise.test/acme/app/pull/{number}',
+                            'head':{'sha':'a'*40},'base':{},'additions':10,'deletions':2,'comments':3,'review_comments':4}
+                return httpx.Response(200,json=data)
+            finally:
+                with lock: active -= 1
+        rows, errors = self.client(handler).enrich([{'repository':'acme/app','number':i} for i in range(1,16)])
+        self.assertEqual(errors,[])
+        self.assertEqual(calls,75)  # detail, reviews, check runs, statuses, final head per PR
+        self.assertGreater(peak,1)
+        self.assertLessEqual(peak,8)
+        self.assertEqual([r['number'] for r in rows],list(range(1,16)))
+        self.assertTrue(all(r['approval_count']==1 and r['comment_count']==7 and r['build']['state']=='success' for r in rows))
+
+    def test_failed_pr_does_not_discard_other_results(self):
+        def handler(request):
+            path = request.url.path
+            if path.endswith('/pulls/1'):
+                return httpx.Response(403,json={})
+            if path.endswith('/reviews'):
+                data = []
+            else:
+                data = {'number':2,'html_url':'https://enterprise.test/acme/app/pull/2','head':{},'base':{}}
+            return httpx.Response(200,json=data)
+        rows, errors = self.client(handler).enrich([{'repository':'acme/app','number':1},{'repository':'acme/app','number':2}],include_checks=False)
+        self.assertEqual(len(rows),2)
+        self.assertEqual(len(errors),1)
+        self.assertEqual(errors[0]['number'],1)
+        self.assertIsNone(rows[0]['approval_count'])
+        self.assertEqual(rows[1]['approval_count'],0)
+        self.assertNotIn('build',rows[1])

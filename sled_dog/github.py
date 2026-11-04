@@ -4,7 +4,7 @@ import re
 import ssl
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timezone
+from threading import BoundedSemaphore
 
 import httpx
 
@@ -22,6 +22,7 @@ class GitHub:
         except (OSError, ValueError):
             raise Failure('Cannot initialize TLS. Check SLED_DOG_CA_BUNDLE.') from None
         self.base = base
+        self.slots = BoundedSemaphore(8)
 
     def close(self):
         self.client.close()
@@ -30,7 +31,8 @@ class GitHub:
         if not path.startswith('/') or '://' in path or '..' in path.split('/'):
             raise Failure('Refused an unsafe API path.')
         try:
-            response = self.client.get(self.base + path, params=params)
+            with self.slots:
+                response = self.client.get(self.base + path, params=params)
         except httpx.HTTPError:
             raise Failure('Cannot reach GitHub. Check host, VPN, network, and certificate trust.') from None
         status = response.status_code
@@ -85,15 +87,6 @@ class GitHub:
             query.append(f'repo:{owner}/{repo}')
         queries = [' '.join(query)]
         warnings = []
-        if args.review_requested:
-            try:
-                teams = self.pages('/user/teams')
-                for team in teams:
-                    org = component(team['organization']['login'])
-                    slug = component(team['slug'])
-                    queries.append(' '.join(x for x in query if not x.startswith('review-requested:')) + f' team-review-requested:{org}/{slug}')
-            except Failure:
-                warnings.append('Team review requests unavailable. Check team visibility permissions.')
         rows = {}
         incomplete = bool(warnings)
         ceiling = False
@@ -127,9 +120,9 @@ class GitHub:
             'labels': [x.get('name') for x in row.get('labels', [])],
             'label_colors': {x.get('name'): x.get('color') for x in row.get('labels', []) if x.get('name')}}
 
-    def detail(self, owner, repo, number):
+    def detail(self, owner, repo, number, payload=None):
         path = f'/repos/{owner}/{repo}/pulls/{number}'
-        row = self.get(path)
+        row = self.get(path) if payload is None else payload
         data = self.summary(row)
         data.update({'body': row.get('body'), 'merged': row.get('merged'), 'mergeable': row.get('mergeable'),
             'head_sha': row.get('head', {}).get('sha'), 'head_branch': row.get('head', {}).get('ref'),
@@ -172,6 +165,46 @@ class GitHub:
                    'message':message} for row in rows for message in row['detail_warnings']]
         return rows, errors
 
+    def enrich(self, pull_requests, include_checks=True):
+        """One bounded pipeline per PR, rather than separate queue-wide phases."""
+        def load(row):
+            errors = []
+            try:
+                owner, repo = repository(row['repository'])
+                payload = self.get(f"/repos/{owner}/{repo}/pulls/{row['number']}")
+                sha = payload.get('head', {}).get('sha')
+                with ThreadPoolExecutor(max_workers=2) as executor:
+                    detail_future = executor.submit(self.detail, owner, repo, row['number'], payload)
+                    check_future = executor.submit(self.checks, owner, repo, row['number'], sha) if include_checks else None
+                    detail, warnings = detail_future.result()
+                    result = dict(row, **{k:v for k,v in detail.items() if k != 'body'}, detail_warnings=warnings)
+                    errors.extend({'message':warning} for warning in warnings)
+                    if check_future:
+                        try:
+                            data, check_errors = check_future.result()
+                            if data['stale']:
+                                check_errors.append({'message':'PR head changed. Rerun to refresh build status.'})
+                            result['build'] = {'state':data['state'], 'head_sha':data['head_sha'],
+                                'counts':dict(Counter(check['state'] for check in data['checks'])),
+                                'total':len(data['checks']), 'fetched_at':now(), 'errors':check_errors}
+                            errors.extend(check_errors)
+                        except Failure as exc:
+                            result['build'] = {'state':'unavailable', 'head_sha':sha, 'counts':{}, 'total':None,
+                                               'fetched_at':now(), 'errors':[{'message':str(exc)}]}
+                            errors.append({'message':str(exc)})
+                return result, errors
+            except Failure as exc:
+                result = dict(row, additions=None, deletions=None, reviews=None, approval_count=None,
+                              comment_count=None, detail_warnings=[str(exc)])
+                if include_checks:
+                    result['build'] = {'state':'unavailable', 'head_sha':None, 'counts':{}, 'total':None,
+                                       'fetched_at':now(), 'errors':[{'message':str(exc)}]}
+                return result, [{'message':str(exc)}]
+        with ThreadPoolExecutor(max_workers=8) as executor:
+            results = list(executor.map(load, pull_requests))
+        return [row for row, _ in results], [dict(error, repository=row['repository'], number=row['number'])
+                                             for row, errors in results for error in errors]
+
     def builds(self, pull_requests):
         """Enrich only displayed PRs, with bounded concurrency and isolated errors."""
         def load(row):
@@ -195,31 +228,37 @@ class GitHub:
                   for row in rows if row['build']['errors']]
         return rows, errors
 
-    def checks(self, owner, repo, number):
+    def checks(self, owner, repo, number, sha=None):
         pr_path = f'/repos/{owner}/{repo}/pulls/{number}'
-        sha = self.get(pr_path).get('head', {}).get('sha')
+        if sha is None:
+            sha = self.get(pr_path).get('head', {}).get('sha')
         if not sha or not re.fullmatch('[a-fA-F0-9]{40,64}', sha):
             raise Failure('GitHub did not return a valid PR head SHA.')
         root = f'/repos/{owner}/{repo}/commits/{sha}'
         rows, errors = [], []
-        for source, path, key in [('check', root + '/check-runs', 'check_runs'), ('status', root + '/statuses', None)]:
-            try:
-                raw = self.pages(path, key, {'filter':'latest'} if source == 'check' else None)
-                latest = {}
-                for item in raw:
-                    identity = ((item.get('app') or {}).get('id'), (item.get('check_suite') or {}).get('id'), item.get('name')) if source == 'check' else item.get('context')
-                    if identity not in latest or item.get('id', 0) > latest[identity].get('id', 0):
-                        latest[identity] = item
-                for item in latest.values():
-                    state = item.get('conclusion') if source == 'check' and item.get('status') == 'completed' else item.get('status') if source == 'check' else item.get('state')
-                    normalized = {'queued':'pending', 'in_progress':'pending', 'waiting':'pending', 'requested':'pending', 'error':'failure'}.get(state, state)
-                    if normalized not in {'success','failure','pending','cancelled','skipped','neutral','action_required','timed_out','stale'}:
-                        normalized = 'unknown'
-                    rows.append({'id':item.get('id'), 'source':source, 'name':item.get('name') or item.get('context'),
-                        'state':normalized, 'raw_state':item.get('status') or item.get('state'), 'conclusion':item.get('conclusion'),
-                        'url':item.get('html_url') or item.get('target_url'), 'started_at':item.get('started_at') or item.get('created_at'), 'completed_at':item.get('completed_at')})
-            except Failure as exc:
-                errors.append({'source':source, 'message':str(exc)})
+        def source_rows(source, path, key):
+            return self.pages(path, key, {'filter':'latest'} if source == 'check' else None)
+        sources = [('check', root + '/check-runs', 'check_runs'), ('status', root + '/statuses', None)]
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            pending = [(source, executor.submit(source_rows, source, path, key)) for source, path, key in sources]
+            for source, future in pending:
+                try:
+                    raw = future.result()
+                    latest = {}
+                    for item in raw:
+                        identity = ((item.get('app') or {}).get('id'), (item.get('check_suite') or {}).get('id'), item.get('name')) if source == 'check' else item.get('context')
+                        if identity not in latest or item.get('id', 0) > latest[identity].get('id', 0):
+                            latest[identity] = item
+                    for item in latest.values():
+                        state = item.get('conclusion') if source == 'check' and item.get('status') == 'completed' else item.get('status') if source == 'check' else item.get('state')
+                        normalized = {'queued':'pending', 'in_progress':'pending', 'waiting':'pending', 'requested':'pending', 'error':'failure'}.get(state, state)
+                        if normalized not in {'success','failure','pending','cancelled','skipped','neutral','action_required','timed_out','stale'}:
+                            normalized = 'unknown'
+                        rows.append({'id':item.get('id'), 'source':source, 'name':item.get('name') or item.get('context'),
+                            'state':normalized, 'raw_state':item.get('status') or item.get('state'), 'conclusion':item.get('conclusion'),
+                            'url':item.get('html_url') or item.get('target_url'), 'started_at':item.get('started_at') or item.get('created_at'), 'completed_at':item.get('completed_at')})
+                except Failure as exc:
+                    errors.append({'source':source, 'message':str(exc)})
         rows.sort(key=lambda row: (row['name'] or '', row['source'], row['id'] or 0))
         stale = self.get(pr_path).get('head', {}).get('sha') != sha
         states = {row['state'] for row in rows}
