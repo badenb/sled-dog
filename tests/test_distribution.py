@@ -47,7 +47,7 @@ class DistributionTests(unittest.TestCase):
                 fixtures = root/'fixtures'
                 fixtures.mkdir()
                 binary = root/'sled-dog'
-                binary.write_text('#!/bin/sh\necho "Sled Dog 0.2.0"\n')
+                binary.write_text('#!/bin/sh\necho "Sled Dog 1.0.0"\n')
                 binary.chmod(0o755)
                 archive = fixtures/'fixture.tar.gz'
                 with tarfile.open(archive,'w:gz') as stream:

@@ -2,7 +2,7 @@
 
 Your pull requests, review requests, and check results—printed inline, then back to your shell.
 
-Sled Dog 0.2 replaces the full-screen dashboard launcher with a read-only CLI. It supports GitHub.com and GitHub Enterprise REST hosts, multiple accounts per host, native OS credential storage, and JSON for scripts. It runs independently of the proposed future web application: no backend, database, browser login, or web-app account is required.
+Sled Dog 1.0 replaces the full-screen dashboard launcher with a read-only CLI. It supports GitHub.com and GitHub Enterprise REST hosts, multiple accounts per host, native OS credential storage, and JSON for scripts. It runs independently of the proposed future web application: no backend, database, browser login, or web-app account is required.
 
 ## Install
 
