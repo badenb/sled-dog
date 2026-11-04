@@ -1,10 +1,10 @@
-# Sled Dog CLI
+# 🐕 Sled Dog CLI
 
-Your pull requests, review requests, and check results—printed inline, then back to your shell.
+**Your pull requests, review requests, and check results.** Printed inline, then back to your shell.
 
 Sled Dog 1.0 replaces the full-screen dashboard launcher with a read-only CLI. It supports GitHub.com and GitHub Enterprise REST hosts, multiple accounts per host, native OS credential storage, and JSON for scripts. It runs independently of the proposed future web application: no backend, database, browser login, or web-app account is required.
 
-## Install
+## 📦 Install
 
 Standalone releases bundle Python and the application libraries. End users do **not** need Python, pip, pipx, uv, Git, Homebrew, or virtual-environment activation.
 
@@ -83,7 +83,7 @@ After installing a standalone release, run `sled-dog` from any directory. Source
 
 Normal commands never create environments or install packages. `sled-dog` with no arguments prints help. For local source testing, `./sled-dog` automatically uses the checkout’s existing `.venv` when present, so activation is optional. It does not create or install that environment.
 
-## Connect an account
+## 🔑 Connect an account
 
 ```sh
 sled-dog auth login --host github.com
@@ -106,7 +106,7 @@ Use a personal token that can read the repositories you need. Fine-grained token
 
 Persistent storage uses explicitly selected native backends on macOS, Windows, and Linux; unavailable/locked stores fail without an insecure fallback. Headless machines can use the ephemeral token method below. Enterprise URL routing and responses are covered by fixtures; authenticated GitHub.com and specific Enterprise Server versions still require live validation before a published release. No Enterprise version compatibility guarantee is claimed yet.
 
-## Daily commands
+## ⌨️ Daily commands
 
 ```sh
 sled-dog pr list --mine
@@ -181,7 +181,7 @@ This is an illustrative empty list response. Errors also use this envelope, with
 
 Reaching your requested list limit is successful, with `truncated: true`. GitHub search timeouts are partial. The search provider ceiling is reported separately; narrow large searches. Results are limited to repositories and teams visible to the token. A successfully completed request does not prove access to every repository in an organization.
 
-## Credentials and configuration
+## 🔒 Credentials and configuration
 
 Non-secret metadata lives in `~/Library/Application Support/Sled Dog/cli-v2.json` on macOS, `%APPDATA%\Sled Dog\cli-v2.json` on Windows, or `$XDG_CONFIG_HOME/sled-dog/cli-v2.json` (default `~/.config/sled-dog/cli-v2.json`) on Linux. Configuration uses atomic writes and mode 0600 files / 0700 directories on POSIX; Windows uses the current user’s profile permissions. Tokens are isolated by host and account under the native-store service `com.sled-dog.cli.v2`. The native backend works in-process; tokens do not enter subprocess arguments. There is no plaintext fallback, telemetry, or persistent PR cache.
 
