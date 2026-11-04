@@ -92,7 +92,7 @@ def run(args, config, secrets_factory=Secrets, github_factory=None):
         except Failure:
             credential_store = 'unavailable; use SLED_DOG_TOKEN with --host on headless systems'
         return envelope({'version':__version__, 'platform':sys.platform, 'standalone':bool(getattr(sys, 'frozen', False)),
-                         'credential_store':credential_store}, {'complete':True}), 0
+                         'credential_store':credential_store, 'eastern_timezone':eastern_time('2026-07-15T20:30:00Z')}, {'complete':True}), 0
     selected = None
     if args.command == 'pr' and args.action != 'list':
         selected = reference(args.reference, args.host)

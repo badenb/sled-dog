@@ -140,3 +140,15 @@ class TimezoneTests(unittest.TestCase):
             self.assertTrue(all(len(line)<=width for line in text.splitlines()))
             if width==140:
                 self.assertLess(len(text.splitlines()),70)
+
+
+class BundledTimezoneTests(unittest.TestCase):
+    def test_timezone_without_system_database(self):
+        code = """
+from zoneinfo import reset_tzpath, ZoneInfo
+reset_tzpath(())
+ZoneInfo.clear_cache()
+from sled_dog.cli import eastern_time
+assert eastern_time('2026-07-15T20:30:00Z') == 'Jul 15 16:30 EDT'
+"""
+        subprocess.run([sys.executable,'-c',code],check=True,cwd=ROOT)
