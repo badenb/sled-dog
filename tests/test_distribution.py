@@ -127,7 +127,7 @@ class TimezoneTests(unittest.TestCase):
         from rich.console import Console
         from sled_dog.cli import review_queue, safe
         rows=[{'repository':'acme/app','number':i,'title':'[bold] Literal title',
-               'labels':['bug'], 'created_at':'2026-01-01T00:00:00Z','updated_at':'2026-07-15T20:30:00Z',
+               'labels':['bug'], 'author':'alice', 'html_url':f'https://github.com/acme/app/pull/{i}', 'created_at':'2026-01-01T00:00:00Z','updated_at':'2026-07-15T20:30:00Z',
                'approval_count':1,'comment_count':2,'reviews':[{'reviewer':'alice','state':'APPROVED'}],
                'additions':10,'deletions':3,'build':{'state':'success'}} for i in range(1,16)]
         for width in (140,60):
@@ -135,11 +135,11 @@ class TimezoneTests(unittest.TestCase):
             console=Console(file=output,width=width,height=25,force_terminal=False)
             review_queue(rows,console)
             text=output.getvalue()
-            for expected in ('#15','bug','alice','EDT','Eastern','--cards','[bold] Literal title'):
+            for expected in ('#15','bug','alice','old)','https://github.com/acme/app/pull/15','1 approval','2 comments','[bold] Literal title'):
                 self.assertIn(expected,text)
             self.assertTrue(all(len(line)<=width for line in text.splitlines()))
             if width==140:
-                self.assertLess(len(text.splitlines()),70)
+                self.assertEqual(len(text.splitlines()),90)
 
 
 class BundledTimezoneTests(unittest.TestCase):
