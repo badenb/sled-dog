@@ -9,6 +9,7 @@ import warnings
 from datetime import datetime, timezone
 from urllib.parse import urlsplit
 
+from . import __version__
 from .config import Config, Failure, Secrets, api_base, host_name
 from .github import GitHub, component, now, repository
 
@@ -32,7 +33,9 @@ def parser():
     common.add_argument('--json', action='store_true')
     common.add_argument('--color', choices=['auto', 'always', 'never'], default='auto')
     root = Parser(prog='sled-dog', description='Your pull requests and checks. Print, finish, return to your shell.')
+    root.add_argument('--version', action='version', version=f'Sled Dog {__version__}')
     subs = root.add_subparsers(dest='command')
+    subs.add_parser('doctor', parents=[common], help='Check installation without network or secrets')
     auth = subs.add_parser('auth').add_subparsers(dest='action', required=True)
     for name in ('login', 'status', 'switch', 'logout', 'migrate'):
         p = auth.add_parser(name, parents=[common])
@@ -78,6 +81,18 @@ def envelope(data=None, meta=None, errors=None):
 
 
 def run(args, config, secrets_factory=Secrets, github_factory=GitHub):
+    if args.command == 'doctor':
+        import ssl
+        import httpx
+        import rich
+        ssl.create_default_context()
+        try:
+            secrets_factory()
+            credential_store = 'available'
+        except Failure:
+            credential_store = 'unavailable; use SLED_DOG_TOKEN with --host on headless systems'
+        return envelope({'version':__version__, 'platform':sys.platform, 'standalone':bool(getattr(sys, 'frozen', False)),
+                         'credential_store':credential_store}, {'complete':True}), 0
     selected = None
     if args.command == 'pr' and args.action != 'list':
         selected = reference(args.reference, args.host)
@@ -93,7 +108,7 @@ def run(args, config, secrets_factory=Secrets, github_factory=GitHub):
             for login in e['accounts']:
                 if args.account and login.lower() != args.account.lower():
                     continue
-                rows.append({'host':h, 'account':login, 'active':login == e.get('active'), 'credential_source':'native keychain', 'api_base':e['api_base']})
+                rows.append({'host':h, 'account':login, 'active':login == e.get('active'), 'credential_source':'native OS credential store', 'api_base':e['api_base']})
         return envelope(rows, meta), 0
     if args.command == 'auth' and args.action in ('switch','logout'):
         if not args.host or not args.account:
@@ -346,6 +361,9 @@ def render(result, color='auto'):
                 console.print(safe(f"    {check['source']} · {check.get('completed_at') or check.get('started_at') or 'time unknown'}"), style='dim')
                 if check['url']:
                     console.print(safe('    ' + check['url']), style='dim')
+        elif 'version' in data:
+            for key, value in data.items():
+                console.print(safe(f'{key.replace("_", " ")}: {value}'))
         elif 'action' in data:
             messages = {'login':'Connected', 'migrate':'Migrated connection for', 'switch':'Selected', 'logout':'Removed local credentials for'}
             console.print(safe(f"{messages[data['action']]} {data['account']} on {meta['host']}."), style='green')

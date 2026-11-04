@@ -1,0 +1,54 @@
+name: Standalone releases
+on:
+  pull_request:
+  workflow_dispatch:
+  push:
+    tags: ['v*']
+permissions:
+  contents: read
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: macos-15, target: macos-arm64 }
+          - { os: macos-15-intel, target: macos-x86_64 }
+          - { os: ubuntu-22.04, target: linux-x86_64 }
+          - { os: ubuntu-22.04-arm, target: linux-arm64 }
+          - { os: windows-2022, target: windows-x86_64 }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install . pyinstaller==6.22.0
+      - run: python -m unittest discover -s tests -v
+      - name: Check release version
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: python -c "import os; from sled_dog import __version__; assert os.environ['RELEASE_TAG'] == 'v' + __version__, 'Tag must match package version'"
+      - run: python scripts/build_release.py --target ${{ matrix.target }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sled-dog-${{ matrix.target }}
+          path: release/*
+  draft-release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: release
+          merge-multiple: true
+      - name: Create draft with verified native artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: gh release create "$RELEASE_TAG" release/* scripts/install.sh scripts/install.ps1 --draft --verify-tag --generate-notes

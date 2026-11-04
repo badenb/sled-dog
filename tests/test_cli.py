@@ -74,7 +74,8 @@ class Tests(unittest.TestCase):
 
     def test_config_atomic_permissions_and_corruption(self):
         self.config.save()
-        self.assertEqual(self.config.path.stat().st_mode & 0o777, 0o600)
+        if os.name != 'nt':
+            self.assertEqual(self.config.path.stat().st_mode & 0o777, 0o600)
         self.assertEqual(Config(self.config.path).data['schema_version'], 1)
         self.config.path.write_text('{bad')
         with self.assertRaises(Failure):
@@ -211,7 +212,7 @@ class StorageTests(unittest.TestCase):
             with self.assertRaises(Failure) as raised:
                 secrets.put('github.com', 'Alice', 'sensitive-token')
             self.assertNotIn('sensitive-token', str(raised.exception))
-        with patch('sys.platform', 'linux'):
+        with patch('sys.platform', 'unsupported'):
             with self.assertRaises(Failure):
                 Secrets()
 

@@ -2,17 +2,62 @@
 
 Your pull requests, review requests, and check results—printed inline, then back to your shell.
 
-Sled Dog 0.2 replaces the full-screen dashboard launcher with a read-only CLI. It supports GitHub.com and GitHub Enterprise REST hosts, multiple accounts per host, native macOS Keychain storage, and JSON for scripts. It runs independently of the proposed future web application: no backend, database, browser login, or web-app account is required.
+Sled Dog 0.2 replaces the full-screen dashboard launcher with a read-only CLI. It supports GitHub.com and GitHub Enterprise REST hosts, multiple accounts per host, native OS credential storage, and JSON for scripts. It runs independently of the proposed future web application: no backend, database, browser login, or web-app account is required.
 
 ## Install
 
-Requires Python 3.10+. From this repository:
+Standalone releases bundle Python and the application libraries. End users do **not** need Python, pip, pipx, uv, Git, Homebrew, or virtual-environment activation.
+
+**Release status:** standalone packaging and installers are in this PR. The download commands below become usable after the first release is published; they do not download PR artifacts. Until then, use the source setup below or download a platform artifact from the “Standalone releases” Actions run and extract it.
+
+### macOS and Linux
+
+Download `install.sh` from the [latest release](https://github.com/badenb/sled-dog/releases/latest), then run it:
 
 ```sh
-pipx install .
-# Alternatively:
-uv tool install .
+sh install.sh
 ```
+
+The installer detects your OS/architecture, downloads and checks the archive's SHA-256, and installs into `~/.local/bin` without sudo. It adds that directory to your Bash/Zsh startup file when needed. Open a new terminal afterward. Other shells get an explicit PATH instruction. Set `SLED_DOG_INSTALL_DIR` to choose another directory. Re-running the installer updates the executable.
+
+### Windows
+
+Download `install.ps1` from the latest release and run it in PowerShell:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1
+```
+
+This process-scoped option lets the downloaded installer run; it does not change the machine's execution policy. The installer verifies SHA-256, installs in `%LOCALAPPDATA%\Programs\Sled Dog`, and adds that directory to your user PATH. Open a new terminal for the updated PATH. No administrator privileges are needed.
+
+### Direct download
+
+Extract the archive for your machine and run `sled-dog` (`sled-dog.exe` on Windows). This also works on machines without curl or PowerShell installer access. Checksums detect corrupted/mismatched downloads; they do not replace publisher code signing. Do not bypass OS security warnings. Signed/notarized release distribution remains a publishing gate.
+
+| Download | Build/test baseline |
+| --- | --- |
+| `sled-dog-macos-arm64.tar.gz` | Apple Silicon, macOS 15 runner |
+| `sled-dog-macos-x86_64.tar.gz` | Intel, macOS 15 runner |
+| `sled-dog-windows-x86_64.zip` | x64, Windows Server 2022 runner; desktop validation required |
+| `sled-dog-linux-x86_64.tar.gz` | Ubuntu 22.04 / glibc 2.35+, x64 |
+| `sled-dog-linux-arm64.tar.gz` | Ubuntu 22.04 / glibc 2.35+, ARM64 |
+
+Alpine/musl, Windows ARM, older operating systems, and arbitrary minimal Linux images are not currently supported. Standalone removes application prerequisites; it cannot remove OS compatibility requirements. Linux persistent login requires a running Secret Service (such as GNOME Keyring or KWallet with Secret Service enabled) and a session bus. On headless systems, use the environment-token method below. No credentials are stored in plaintext.
+
+After installing:
+
+```sh
+sled-dog --version
+sled-dog doctor
+sled-dog auth login --host github.com
+sled-dog pr list --mine
+```
+
+`doctor` checks bundled imports and native-store availability without contacting GitHub or reading tokens. Login currently requires one token paste; browser OAuth login is not yet implemented.
+
+### Source installation
+
+Source installs require Python 3.10+ and can still use `pipx install .` or `uv tool install .`.
 
 For development:
 
@@ -23,7 +68,7 @@ python -m pip install -e .
 python -m unittest discover -s tests -v
 ```
 
-The tool installer manages an isolated environment automatically. After installation, run `sled-dog` from any directory; users never activate `.venv` or clone the repository for daily use. A standalone installer/Homebrew distribution is not shipped yet.
+After installing a standalone release, run `sled-dog` from any directory. Source development environments are separate from the end-user installation.
 
 Normal commands never create environments or install packages. `sled-dog` with no arguments prints help. For local source testing, `./sled-dog` automatically uses the checkout’s existing `.venv` when present, so activation is optional. It does not create or install that environment.
 
@@ -36,7 +81,7 @@ sled-dog auth status
 sled-dog auth switch --host github.com --account your-login
 ```
 
-Login prompts for a token with hidden input, verifies the account through `/user`, and stores it in macOS Keychain. Logging in with a different token adds another account; `--account LOGIN` can explicitly require a matching identity. Switching changes the default host and the active account on that host. Accounts on other hosts remain available.
+Login prompts for a token with hidden input, verifies the account through `/user`, and stores it in macOS Keychain, Windows Credential Manager, or the Linux desktop Secret Service. Logging in with a different token adds another account; `--account LOGIN` can explicitly require a matching identity. Switching changes the default host and the active account on that host. Accounts on other hosts remain available.
 
 For Enterprise Server, the API defaults to `https://HOST/api/v3`. For a different deployment, including Enterprise Cloud custom domains, set the API base explicitly:
 
@@ -48,7 +93,7 @@ HTTPS and certificate verification are mandatory. Set `SLED_DOG_CA_BUNDLE` to a 
 
 Use a personal token that can read the repositories you need. Fine-grained tokens need read access to pull requests, checks, commit statuses, and repository metadata. Team review discovery also needs visibility into your organization teams; token and organization policies may restrict this. Classic tokens generally need `repo` for private repositories and `read:org` for team membership. Authorize organization SSO where required. The CLI makes read requests, but cannot make a broadly privileged token read-only.
 
-Persistent credential storage is currently supported on macOS. Other systems can use the ephemeral token method below. Enterprise URL routing and responses are covered by fixtures; authenticated GitHub.com and specific Enterprise Server versions still require live validation before a published release. No Enterprise version compatibility guarantee is claimed yet.
+Persistent storage uses explicitly selected native backends on macOS, Windows, and Linux; unavailable/locked stores fail without an insecure fallback. Headless machines can use the ephemeral token method below. Enterprise URL routing and responses are covered by fixtures; authenticated GitHub.com and specific Enterprise Server versions still require live validation before a published release. No Enterprise version compatibility guarantee is claimed yet.
 
 ## Daily commands
 
@@ -127,7 +172,7 @@ Reaching your requested list limit is successful, with `truncated: true`. GitHub
 
 ## Credentials and configuration
 
-Non-secret metadata lives in `~/Library/Application Support/Sled Dog/cli-v2.json` on macOS, or `$XDG_CONFIG_HOME/sled-dog/cli-v2.json` (default `~/.config/sled-dog/cli-v2.json`) elsewhere. Configuration uses atomic writes, mode 0600 files, and mode 0700 directories. Tokens are isolated by host and account under the Keychain service `com.sled-dog.cli.v2`. The native backend works in-process; tokens do not enter subprocess arguments. There is no plaintext fallback, telemetry, or persistent PR cache.
+Non-secret metadata lives in `~/Library/Application Support/Sled Dog/cli-v2.json` on macOS, `%APPDATA%\Sled Dog\cli-v2.json` on Windows, or `$XDG_CONFIG_HOME/sled-dog/cli-v2.json` (default `~/.config/sled-dog/cli-v2.json`) on Linux. Configuration uses atomic writes and mode 0600 files / 0700 directories on POSIX; Windows uses the current user’s profile permissions. Tokens are isolated by host and account under the native-store service `com.sled-dog.cli.v2`. The native backend works in-process; tokens do not enter subprocess arguments. There is no plaintext fallback, telemetry, or persistent PR cache.
 
 `auth status` lists configured account metadata and its configured credential source; it does not test remote authentication or unlock Keychain. To remove a stored token and account:
 
@@ -153,10 +198,24 @@ Migration reads the old `config.json` beside `cli-v2.json` and the old Keychain 
 
 ## Development and scope
 
-The package uses argparse for finite command parsing, Rich for inline rendering, HTTPX for host-bound requests, and an explicitly selected native macOS Keychain backend. The future web app shares no runtime or authentication dependencies. The initial design is in [docs/cli-release.md](docs/cli-release.md).
+The package uses argparse for finite command parsing, Rich for inline rendering, HTTPX for host-bound requests, and an explicitly selected native credential backends. The future web app shares no runtime or authentication dependencies. The initial design is in [docs/cli-release.md](docs/cli-release.md).
 
-Run tests with `python -m unittest discover -s tests -v`. `requirements-dev.lock` records the macOS development environment; the package metadata allows compatible dependency versions on other platforms. CI tests Python 3.10 and 3.14 on macOS and Linux using mocked HTTP and credential adapters. No tests need real credentials or mutate GitHub data.
+Run tests with `python -m unittest discover -s tests -v`. `requirements-dev.lock` records the macOS development environment; the package metadata allows compatible dependency versions on other platforms. CI tests Python 3.10 and 3.14 on macOS and Linux, plus native release builds on macOS, Windows, and Linux using mocked HTTP and credential adapters. No tests need real credentials or mutate GitHub data.
 
 Before publishing: exercise real GitHub.com and named Enterprise Server versions, test native Keychain login/logout, and visually check a narrow terminal. Fixture tests do not establish live server compatibility.
 
 PR mutations, checkout/diffs, watch mode, cross-host aggregation, direct Jenkins/Digital.ai integrations, OAuth device login, and web synchronization are deferred.
+
+
+## Building and publishing standalone releases
+
+Build on the target OS/architecture (cross-compilation is intentionally rejected):
+
+```sh
+python -m pip install . pyinstaller==6.22.0
+python scripts/build_release.py --target macos-arm64
+```
+
+Other targets are `macos-x86_64`, `windows-x86_64`, `linux-x86_64`, and `linux-arm64`. Output is in `release/`; extracted executables do not need the build environment. Each build runs `--version`, `--help`, and `doctor --json` against the actual frozen executable, and archives third-party license notices alongside it.
+
+The Standalone releases workflow builds all five targets for PRs and manual runs and uploads artifacts for review. A `v*` tag builds all targets and creates a **draft** GitHub release containing the archives, individual SHA-256 files, and installers. It never automatically publishes a release. Before publishing, validate desktop credential login/logout, supported OS versions, authenticated GitHub/Enterprise behavior, and OS code-signing/notarization requirements. Apple Developer ID/notarization and Windows signing credentials are not configured by this PR; do not advertise warning-free downloaded binaries until signed artifacts are produced and tested.

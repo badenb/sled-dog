@@ -36,6 +36,8 @@ class Config:
         if path is None:
             if sys.platform == 'darwin':
                 root = Path.home() / 'Library/Application Support/Sled Dog'
+            elif sys.platform == 'win32':
+                root = Path(os.environ.get('APPDATA', Path.home() / 'AppData/Roaming')) / 'Sled Dog'
             else:
                 root = Path(os.environ.get('XDG_CONFIG_HOME', Path.home() / '.config')) / 'sled-dog'
             path = root / 'cli-v2.json'
@@ -81,10 +83,18 @@ class Secrets:
     def __init__(self):
         # Select a native backend explicitly: never accept plaintext/chained plugins.
         try:
-            if sys.platform != 'darwin':
+            if sys.platform == 'darwin':
+                from keyring.backends.macOS import Keyring
+            elif sys.platform == 'win32':
+                from keyring.backends.Windows import WinVaultKeyring as Keyring
+            elif sys.platform.startswith('linux'):
+                from keyring.backends.SecretService import Keyring
+            else:
                 raise RuntimeError()
-            from keyring.backends.macOS import Keyring
             self.backend = Keyring()
+            # Linux checks for a usable desktop Secret Service; never fall back to files.
+            if sys.platform.startswith('linux'):
+                self.backend.priority
         except Exception:
             raise Failure('Native credential storage unavailable. Use SLED_DOG_TOKEN with --host.', 3) from None
 
@@ -95,7 +105,7 @@ class Secrets:
         try:
             return self.backend.get_password('com.sled-dog.cli.v2', self.key(host, account))
         except Exception:
-            raise Failure('Cannot access native credentials. Unlock Keychain and retry.', 3) from None
+            raise Failure('Cannot access native credentials. Unlock your OS credential store and retry.', 3) from None
 
     def put(self, host, account, token):
         try:
