@@ -205,7 +205,7 @@ HTTP errors provide sanitized guidance without raw response bodies. All requests
 
 ## Migrating from the dashboard
 
-The previous launcher commands `run`, `web`, `configure`, and `status` have been replaced by the commands above. Existing legacy modules are retained for reference, with their old instructions archived in [docs/legacy-dashboard.md](legacy-dashboard.md). They are not imported by the new CLI and their dependencies are not installed.
+The previous launcher commands `run`, `web`, `configure`, and `status` have been replaced by the commands above. The old Streamlit and terminal dashboard code has been removed; it remains in git history before the monorepo move.
 
 To copy a legacy saved GitHub connection into the new account model on macOS:
 

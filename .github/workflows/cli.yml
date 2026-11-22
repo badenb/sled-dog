@@ -1,5 +1,9 @@
 name: CLI
-on: [push, pull_request]
+on:
+  push:
+    paths: ['apps/cli/**', '.github/workflows/cli.yml']
+  pull_request:
+    paths: ['apps/cli/**', '.github/workflows/cli.yml']
 jobs:
   test:
     strategy:
@@ -7,6 +11,9 @@ jobs:
         os: [ubuntu-latest, macos-latest]
         python: ['3.10', '3.14']
     runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: apps/cli
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

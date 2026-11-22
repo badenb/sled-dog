@@ -18,6 +18,9 @@ jobs:
           - { os: ubuntu-22.04-arm, target: linux-arm64 }
           - { os: windows-2022, target: windows-x86_64 }
     runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: apps/cli
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -38,7 +41,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: sled-dog-${{ matrix.target }}
-          path: release/*
+          path: apps/cli/release/*
   draft-release:
     if: startsWith(github.ref, 'refs/tags/v')
     needs: build
@@ -55,4 +58,4 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ github.ref_name }}
-        run: gh release create "$RELEASE_TAG" release/* scripts/install.sh scripts/install.ps1 --draft --verify-tag --generate-notes
+        run: gh release create "$RELEASE_TAG" release/* apps/cli/scripts/install.sh apps/cli/scripts/install.ps1 --draft --verify-tag --generate-notes
