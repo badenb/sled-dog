@@ -25,17 +25,22 @@ async function magic() {
 </script>
 
 <template>
-  <main class="login">
-    <h1>🐕 Sled Dog</h1>
-    <p class="muted">Sign in to your workspace.</p>
-    <button class="primary" @click="github">Continue with GitHub</button>
-    <div class="or">or</div>
-    <form v-if="!sent" @submit.prevent="magic">
-      <input v-model="email" type="email" required placeholder="you@company.com" aria-label="Email">
-      <button :disabled="busy || !email">Email me a sign-in link</button>
-    </form>
-    <p v-else>Check your inbox for the link. It expires in 10 minutes.</p>
-    <p v-if="error" class="error">{{ error }}</p>
-    <p class="muted small">Access is by invitation.</p>
+  <main class="login-wrap">
+    <div class="login">
+      <div class="logo" aria-hidden="true">🐕</div>
+      <div>
+        <h1>Sled Dog</h1>
+        <p class="muted" style="margin: 4px 0 0">Sign in to your workspace</p>
+      </div>
+      <p v-if="error" class="notice" role="alert" style="margin: 0">{{ error }}</p>
+      <button class="primary" @click="github">Continue with GitHub</button>
+      <div class="divider">or</div>
+      <form v-if="!sent" @submit.prevent="magic">
+        <input v-model="email" type="email" required placeholder="you@company.com" aria-label="Email" autocomplete="email">
+        <button :disabled="busy || !email">{{ busy ? 'Sending…' : 'Email me a sign-in link' }}</button>
+      </form>
+      <p v-else class="reveal" style="margin: 0">Check your inbox for the link. It expires in 10 minutes.</p>
+      <p class="muted small" style="margin: 0">Access is by invitation.</p>
+    </div>
   </main>
 </template>
