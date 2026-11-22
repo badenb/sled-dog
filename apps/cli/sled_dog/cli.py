@@ -370,7 +370,10 @@ def render(result, color='auto'):
     if meta.get('host'):
         console.print(safe(f"{meta['host']} / {meta.get('account') or 'no active account'}"), style='dim')
     console.print()
-    if meta.get('kind') == 'tickets':
+    if meta.get('kind') == 'sync':
+        from .platform import render_sync
+        render_sync(data, console, safe)
+    elif meta.get('kind') == 'tickets':
         from .platform import render_tickets
         if isinstance(data, list) and not data:
             console.print('No tickets.')
