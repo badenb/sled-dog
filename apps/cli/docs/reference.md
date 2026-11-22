@@ -2,7 +2,7 @@
 
 Detailed installation, command behavior, security, automation, and development notes. Start with the [quick start](../README.md).
 
-Sled Dog 1.0 replaces the full-screen dashboard launcher with a read-only CLI. It supports GitHub.com and GitHub Enterprise REST hosts, multiple accounts per host, native OS credential storage, and JSON for scripts. It runs independently of the proposed future web application: no backend, database, browser login, or web-app account is required.
+Sled Dog 1.0 replaces the full-screen dashboard launcher with a CLI. The GitHub commands are read-only and support GitHub.com and GitHub Enterprise REST hosts, multiple accounts per host, native OS credential storage, and JSON for scripts. They run independently of the Sled Dog server: no backend, database, or web-app account is required. The `server` and `ticket` commands (see [Tickets](#tickets)) talk to a Sled Dog server and can change tickets.
 
 <a id="installation"></a>
 
@@ -187,6 +187,31 @@ This is an illustrative empty list response. Errors also use this envelope, with
 
 Reaching your requested list limit is successful, with `truncated: true`. GitHub search timeouts are partial. The search provider ceiling is reported separately; narrow large searches. Results are limited to repositories and teams visible to the token. A successfully completed request does not prove access to every repository in an organization.
 
+<a id="tickets"></a>
+
+## 🎫 Tickets and the Sled Dog server
+
+These commands need a Sled Dog server and an API token from its **API tokens** page. They share the JSON envelope and exit codes above.
+
+```sh
+echo "$TOKEN" | sled-dog server login --url https://sled-dog.example.com --with-token
+sled-dog server status
+sled-dog ticket list [--status STATUS] [--assignee LOGIN] [--limit N]
+sled-dog ticket view SD-12
+sled-dog ticket create TITLE [--body TEXT] [--status STATUS] [--priority PRIORITY] [--assignee LOGIN] [--dry-run] [--idempotency-key KEY]
+sled-dog ticket update SD-12 [--title TEXT] [--body TEXT] [--status STATUS] [--priority PRIORITY] [--assignee LOGIN] [--dry-run]
+sled-dog server sync
+```
+
+Statuses: `backlog`, `todo`, `in_progress`, `in_review`, `done`, `canceled`. Priorities: `none`, `low`, `medium`, `high`, `urgent`. `--assignee ""` unassigns.
+
+- **Login** verifies the token against the server before saving it, then stores it in the native credential store under the server's host. `login` requires `--with-token` and piped input; never pass a token as an argument. For automation, set `SLED_DOG_SERVER` and `SLED_DOG_API_TOKEN` instead.
+- **Transport:** the server URL must be HTTPS, except `localhost`/`127.0.0.1` for development. URLs with credentials, queries, or fragments are refused. Redirects are never followed, so the token is never forwarded.
+- **Safe writes:** `--dry-run` returns what would change without writing (`meta.dry_run: true`). `ticket create` always sends an idempotency key, generated if you omit one and reported in `meta.idempotency_key`; retrying with the same key returns the original ticket instead of creating another.
+- **Permissions:** a token carries scopes (for example `ticket:read`, `ticket:create`, `ticket:update`) and can never exceed the permissions of the person who created it. It stops working if that person loses access. Rejected tokens or scopes exit with code 3, invalid field values with 2, and a missing ticket with 1.
+- **`ticket view`** lists linked pull requests with state, CI result, and review decision. Pull-request titles come from GitHub and are printed as plain text with terminal escapes removed.
+- **`server sync`** asks the server to pull pull requests from the GitHub org or repos its owner configured, link them to tickets (an `SD-<n>` mention in the branch, title, or description), and advance ticket status. It reports pull requests seen, new links, and tickets moved. It needs `ticket:update`.
+
 <a id="credentials"></a>
 
 ## 🔒 Credentials and configuration
@@ -217,13 +242,13 @@ Migration reads the old `config.json` beside `cli-v2.json` and the old Keychain 
 
 ## Development and scope
 
-The package uses argparse for finite command parsing, Rich for inline rendering, HTTPX for host-bound requests, and explicitly selected native credential backends. The future web app shares no runtime or authentication dependencies. The initial design is in [docs/cli-release.md](cli-release.md).
+The package uses argparse for finite command parsing, Rich for inline rendering, HTTPX for host-bound requests, and explicitly selected native credential backends. The CLI shares no runtime or authentication dependencies with the web app; the `server` and `ticket` commands talk to it over HTTPS and the JSON contract. The initial design is in [docs/cli-release.md](cli-release.md).
 
 Run tests with `python -m unittest discover -s tests -v`. `requirements-dev.lock` records the macOS development environment; the package metadata allows compatible dependency versions on other platforms. CI tests Python 3.10 and 3.14 on macOS and Linux, plus native release builds on macOS, Windows, and Linux using mocked HTTP and credential adapters. No tests need real credentials or mutate GitHub data.
 
 Before publishing: exercise real GitHub.com and named Enterprise Server versions, test native Keychain login/logout, and visually check a narrow terminal. Fixture tests do not establish live server compatibility.
 
-PR mutations, checkout/diffs, watch mode, cross-host aggregation, direct Jenkins/Digital.ai integrations, OAuth device login, and web synchronization are deferred.
+PR mutations, checkout/diffs, watch mode, cross-host aggregation, direct Jenkins/Digital.ai integrations, and OAuth device login are deferred.
 
 
 ## Building and publishing standalone releases
