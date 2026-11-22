@@ -10,6 +10,7 @@ const { data: me } = await useMe()
       <nav class="nav">
         <NuxtLink to="/">Tickets</NuxtLink>
         <NuxtLink v-if="me.can['team:invite']" to="/team">Team</NuxtLink>
+        <NuxtLink to="/settings/github">GitHub</NuxtLink>
         <NuxtLink to="/settings/tokens">API tokens</NuxtLink>
         <span class="muted">{{ me.name || me.email }} · {{ me.role }}</span>
         <button @click="signOut">Sign out</button>

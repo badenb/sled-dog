@@ -1,6 +1,7 @@
 name: Standalone releases
 on:
   pull_request:
+    paths: ['apps/cli/**', '.github/workflows/release.yml']
   workflow_dispatch:
   push:
     tags: ['v*']

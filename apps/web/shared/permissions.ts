@@ -39,5 +39,5 @@ export const roles = {
 
 export type RoleName = keyof typeof roles
 export const ROLE_NAMES = Object.keys(roles) as RoleName[]
-export type Resource = 'ticket' | 'initiative' | 'report'
+export type Resource = 'ticket' | 'initiative' | 'report' | 'organization'
 export type Action = 'read' | 'create' | 'update' | 'delete'

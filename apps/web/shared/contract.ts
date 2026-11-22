@@ -44,6 +44,20 @@ export interface Ticket {
   createdBy: string
   createdAt: string
   updatedAt: string
+  pullRequests?: PullRequestSummary[]
+}
+
+export interface PullRequestSummary {
+  key: string // owner/repo#123
+  repo: string
+  number: number
+  title: string
+  url: string
+  state: 'open' | 'closed' | 'merged'
+  draft: boolean
+  author: string | null
+  checks: 'success' | 'failure' | 'pending' | 'none'
+  reviewDecision: string | null
 }
 
 export interface Envelope<T> {
@@ -66,3 +80,8 @@ export const tokenCreate = z.object({
   scopes: z.array(z.enum(PERMISSIONS)).min(1),
 })
 export type TokenCreate = z.infer<typeof tokenCreate>
+
+const sourceName = z.string().trim().regex(/^[A-Za-z0-9_.-]+(\/[A-Za-z0-9_.-]+)?$/, 'Use an org like "acme" or a repo like "acme/service"')
+export const githubSourceInput = z.object({ kind: z.enum(['org', 'repo']), name: sourceName })
+  .refine(s => (s.kind === 'repo') === s.name.includes('/'), 'An org has no slash; a repo is owner/name')
+export const githubSettingsInput = z.object({ sources: z.array(githubSourceInput).max(25) })
