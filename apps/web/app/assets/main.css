@@ -36,3 +36,7 @@ fieldset { border: 1px solid var(--border); border-radius: 8px; } .check { displ
 .row { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 8px 0; border-bottom: 1px solid var(--border); }
 .reveal { background: var(--surface); border: 1px solid var(--accent); border-radius: 8px; padding: 12px; margin: 12px 0; display: grid; gap: 6px; }
 code { word-break: break-all; font-size: 13px; }
+.prs { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
+.pr { font-size: 12px; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--border); text-decoration: none; color: var(--text); }
+.pr.open { border-color: var(--s-done); } .pr.merged { border-color: var(--s-in_review); } .pr.closed { border-color: var(--s-canceled); } .pr.draft { border-color: var(--s-backlog); }
+.ci.success { color: var(--s-done); } .ci.failure { color: var(--s-canceled); } .ci.pending { color: var(--s-in_progress); }

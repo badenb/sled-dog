@@ -47,6 +47,11 @@ const label = (s: string) => s.replace('_', ' ')
         <div class="id">{{ t.id }}</div>
         <div>{{ t.title }}</div>
         <div class="meta"><span v-if="t.priority !== 'none'">{{ t.priority }}</span><span v-if="t.assignee">@{{ t.assignee }}</span></div>
+        <div v-if="t.pullRequests?.length" class="prs">
+          <a v-for="pr in t.pullRequests" :key="pr.key" :href="pr.url" target="_blank" rel="noopener noreferrer" :class="['pr', pr.draft ? 'draft' : pr.state]" :title="`${pr.repo}#${pr.number}: ${pr.title}`">
+            #{{ pr.number }} {{ pr.draft ? 'draft' : pr.state }}<span v-if="pr.checks !== 'none'" :class="['ci', pr.checks]"> {{ { success: '✓', failure: '✗', pending: '…' }[pr.checks] }}</span>
+          </a>
+        </div>
       </article>
       <p v-if="!byStatus(status).length" class="muted">Empty</p>
     </section>
