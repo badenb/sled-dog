@@ -12,6 +12,11 @@ import { ac, roles } from '../shared/permissions'
 
 const dev = process.env.NODE_ENV !== 'production'
 
+async function userCount() {
+  const [row] = await db.select({ n: count() }).from(schema.user)
+  return row?.n ?? 0
+}
+
 /** Real email delivery is not wired yet. Dev prints links; production refuses rather than lose them. */
 async function deliver(kind: string, to: string, url: string) {
   if (!dev) throw new APIError('SERVICE_UNAVAILABLE', { message: 'Email delivery is not configured.' })
@@ -52,16 +57,14 @@ export const auth = betterAuth({
       create: {
         // Invite-only: the first user bootstraps the workspace; after that you need a pending invitation.
         before: async (user) => {
-          const [{ n }] = await db.select({ n: count() }).from(schema.user)
-          if (n === 0) return
+          if ((await userCount()) === 0) return
           const invite = await db.select({ id: schema.invitation.id }).from(schema.invitation)
             .where(and(sql`lower(${schema.invitation.email}) = ${user.email.toLowerCase()}`, eq(schema.invitation.status, 'pending'), gt(schema.invitation.expiresAt, new Date()))).get()
           if (!invite) throw new APIError('FORBIDDEN', { message: 'This workspace is invite-only. Ask an owner to invite you.' })
         },
         after: async (user) => {
           const now = new Date()
-          const [{ n }] = await db.select({ n: count() }).from(schema.user)
-          if (n === 1) {
+          if ((await userCount()) === 1) {
             const organizationId = randomUUID()
             await db.insert(schema.organization).values({ id: organizationId, name: 'Workspace', slug: 'workspace', createdAt: now })
             await db.insert(schema.member).values({ id: randomUUID(), organizationId, userId: user.id, role: 'owner', createdAt: now })
