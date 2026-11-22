@@ -40,3 +40,8 @@ code { word-break: break-all; font-size: 13px; }
 .pr { font-size: 12px; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--border); text-decoration: none; color: var(--text); }
 .pr.open { border-color: var(--s-done); } .pr.merged { border-color: var(--s-in_review); } .pr.closed { border-color: var(--s-canceled); } .pr.draft { border-color: var(--s-backlog); }
 .ci.success { color: var(--s-done); } .ci.failure { color: var(--s-canceled); } .ci.pending { color: var(--s-in_progress); }
+.col { transition: border-color .1s, background .1s; min-height: 80px; }
+.col.over { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, var(--surface)); }
+.card.movable { cursor: grab; } .card.movable:active { cursor: grabbing; }
+.card.dragging { opacity: .45; } .card.moving { opacity: .7; }
+select.move { margin-top: 6px; padding: 2px 6px; font-size: 12px; color: var(--muted); max-width: 100%; }
