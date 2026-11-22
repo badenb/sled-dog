@@ -86,3 +86,37 @@ class PlatformTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+    def test_server_sync_posts_and_reports_kind(self):
+        result, code = self.call('server sync', {'schema_version': 1, 'data': [], 'meta': {'complete': True}, 'errors': []})
+        self.assertEqual((self.requests[0].method, self.requests[0].url.path), ('POST', '/api/sync'))
+        self.assertEqual(result['meta']['kind'], 'sync')
+        self.assertEqual(code, 0)
+
+
+class RenderTests(unittest.TestCase):
+    def render(self, result):
+        import contextlib, io
+        from sled_dog.cli import render
+        buffer = io.StringIO()
+        with contextlib.redirect_stdout(buffer):
+            render(result, 'never')
+        return buffer.getvalue()
+
+    def test_ticket_view_lists_linked_pull_requests_literally(self):
+        ticket = {'id': 'SD-1', 'status': 'in_review', 'priority': 'none', 'assignee': None, 'title': 'Login',
+                  'pullRequests': [{'key': 'acme/web#7', 'state': 'open', 'draft': False, 'checks': 'failure', 'reviewDecision': 'changes_requested',
+                                    'title': '\x1b[31mred\x1b[0m title', 'url': 'https://github.com/acme/web/pull/7'}]}
+        out = self.render({'schema_version': 1, 'data': ticket, 'meta': {'kind': 'tickets'}, 'errors': []})
+        self.assertIn('acme/web#7', out)
+        self.assertIn('CI failing', out)
+        self.assertIn('review changes requested', out)
+        self.assertNotIn('\x1b', out)  # untrusted PR titles cannot inject terminal escapes
+
+    def test_sync_summary_shows_moves_and_errors(self):
+        rows = [{'source': 'acme', 'prsSeen': 2, 'linked': 1, 'truncated': False, 'error': None,
+                 'transitions': [{'ticket': 'SD-1', 'from': 'todo', 'to': 'in_review'}]},
+                {'source': 'bad', 'prsSeen': 0, 'linked': 0, 'transitions': [], 'truncated': False, 'error': 'GitHub rejected SLED_DOG_GITHUB_TOKEN.'}]
+        out = self.render({'schema_version': 1, 'data': rows, 'meta': {'kind': 'sync'}, 'errors': []})
+        self.assertIn('SD-1: todo -> in review', out)
+        self.assertIn('GitHub rejected', out)

@@ -1,75 +1,35 @@
-# Nuxt Minimal Starter
+# Sled Dog web
 
-Look at the [Nuxt documentation](https://nuxt.com/docs/getting-started/introduction) to learn more.
+Nuxt 4 + Vue 3 + TypeScript. UI, API, auth, and database in one app.
 
-## Setup
-
-Make sure to install dependencies:
-
-```bash
-# npm
-npm install
-
-# pnpm
-pnpm install
-
-# yarn
-yarn install
-
-# bun
-bun install
+```sh
+npm install        # from the repo root
+npm run dev        # http://localhost:3000
+npm test && npm run typecheck && npm run build
 ```
 
-## Development Server
+Local secrets go in the repo-root `.env` (gitignored). In production, set real environment variables.
 
-Start the development server on `http://localhost:3000`:
+| Variable | Purpose |
+| --- | --- |
+| `BETTER_AUTH_SECRET` | Signs sessions. Required. |
+| `BETTER_AUTH_URL` | Public URL of the app (default `http://localhost:3000`). Must match the browser origin. |
+| `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` | GitHub OAuth app for sign-in. Callback: `<BETTER_AUTH_URL>/api/auth/callback/github`. |
+| `SLED_DOG_GITHUB_TOKEN` | Token the server uses to read pull requests (read-only repo access). Enables sync. |
+| `SLED_DOG_GITHUB_API_BASE` | GitHub Enterprise API base, e.g. `https://git.corp.com/api/v3`. Default `https://api.github.com`. |
+| `SLED_DOG_SYNC_INTERVAL_SECONDS` | Background sync period (default 300, `0` disables). |
+| `SLED_DOG_DB_URL` | libSQL/SQLite URL (default `file:.data/sled-dog.db`). |
 
-```bash
-# npm
-npm run dev
+## GitHub sync
 
-# pnpm
-pnpm dev
+An owner chooses one GitHub org or a list of repos under **GitHub** in the app. Pull requests that mention a ticket (`SD-12` in the branch, title, or description) are linked to it and move it automatically:
 
-# yarn
-yarn dev
+- draft PR open → **in progress**
+- non-draft PR open → **in review**
+- no open PRs and at least one merged → **done**
 
-# bun
-bun run dev
-```
+Tickets only move forward, and `done`/`canceled` tickets are never changed by sync. Each automatic move is written to the audit log as `github-sync`. Trigger a sync from the app, or with `sled-dog server sync`.
 
-## Production
+## Database
 
-Build the application for production:
-
-```bash
-# npm
-npm run build
-
-# pnpm
-pnpm build
-
-# yarn
-yarn build
-
-# bun
-bun run build
-```
-
-Locally preview production build:
-
-```bash
-# npm
-npm run preview
-
-# pnpm
-pnpm preview
-
-# yarn
-yarn preview
-
-# bun
-bun run preview
-```
-
-Check out the [deployment documentation](https://nuxt.com/docs/getting-started/deployment) for more information.
+Schema is in `server/db/schema.ts`; migrations are generated with `npx drizzle-kit generate` and applied automatically at startup. Run the server from `apps/web` so it finds the `drizzle/` folder.

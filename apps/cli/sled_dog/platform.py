@@ -75,6 +75,7 @@ def add_parsers(subs, common, Parser):
     p.add_argument('--url', required=True)
     p.add_argument('--with-token', action='store_true', help='Read the API token from stdin')
     server.add_parser('status', parents=[common])
+    server.add_parser('sync', parents=[common], help='Pull GitHub pull requests now and update linked tickets')
 
     ticket = subs.add_parser('ticket').add_subparsers(dest='action', required=True)
     p = ticket.add_parser('list', parents=[common])
@@ -127,7 +128,7 @@ def run(args, config, secrets_factory, platform_factory=Platform, read_stdin=Non
         raise Failure('No server configured. Run sled-dog server login --url URL --with-token.', 3)
     url = server_url(url)
     meta['server'] = url
-    if args.command == 'server':
+    if args.command == 'server' and args.action == 'status':
         return {'schema_version': 1, 'data': {'url': url}, 'meta': meta, 'errors': []}, 0
     token = os.environ.get('SLED_DOG_API_TOKEN') or secrets_factory().get(credential_host(url), 'api-token')
     if not token:
@@ -135,6 +136,10 @@ def run(args, config, secrets_factory, platform_factory=Platform, read_stdin=Non
 
     client = platform_factory(url, token)
     try:
+        if args.command == 'server':  # sync
+            result = client.request('POST', '/api/sync')
+            result['meta'] = dict(meta, **result.get('meta', {}), kind='sync')
+            return result, 0 if result['meta'].get('complete', True) else 4
         if args.action == 'list':
             if not 1 <= args.limit <= 200:
                 raise Failure('--limit must be between 1 and 200.', 2)
@@ -174,3 +179,41 @@ def render_tickets(data, console, safe):
         table.add_row(Text(safe(row.get('id', 'new')), style='cyan'), Text(safe(status.replace('_', ' ')), style=colors.get(status, '')),
                       safe(row.get('priority', '')), safe(row.get('assignee') or '-'), safe(row.get('title', '')))
     console.print(table)
+    if not isinstance(data, list):
+        render_pull_requests(data.get('pullRequests') or [], console, safe)
+
+
+def render_pull_requests(prs, console, safe):
+    from rich.text import Text
+    if not prs:
+        return
+    console.print()
+    console.print('Pull requests', style='bold')
+    states = {'open': 'green', 'merged': 'magenta', 'closed': 'red'}
+    ci = {'success': ('passing', 'green'), 'failure': ('failing', 'red'), 'pending': ('running', 'yellow'), 'none': ('no checks', 'dim')}
+    for pr in prs:
+        label, color = ci.get(pr.get('checks'), ('unknown', 'dim'))
+        line = Text('  ' + safe(pr['key']), style='cyan')
+        line.append('  ' + ('draft' if pr.get('draft') else safe(pr['state'])), style=states.get(pr['state'], '') if not pr.get('draft') else 'yellow')
+        line.append('  CI ' + label, style=color)
+        if pr.get('reviewDecision'):
+            line.append('  review ' + safe(pr['reviewDecision'].replace('_', ' ')), style='dim')
+        console.print(line)
+        console.print(safe('    ' + pr['title']), style='dim')
+        console.print(safe('    ' + pr['url']), style='dim')
+
+
+def render_sync(data, console, safe):
+    from rich.text import Text
+    for row in data:
+        if row.get('error'):
+            console.print(Text(safe(f"{row['source']}: {row['error']}"), style='red'))
+            continue
+        line = f"{row['source']}: {row['prsSeen']} PR(s) seen, {row['linked']} newly linked"
+        console.print(safe(line), style='green')
+        for move in row['transitions']:
+            console.print(safe(f"  {move['ticket']}: {move['from'].replace('_', ' ')} -> {move['to'].replace('_', ' ')}"))
+        if row.get('truncated'):
+            console.print('  More PRs remain; run sync again.', style='yellow')
+    if not data:
+        console.print('No GitHub sources configured. Add one in the web app under GitHub.', style='yellow')
