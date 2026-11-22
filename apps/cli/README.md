@@ -77,6 +77,25 @@ Use `--host HOST --account LOGIN` to select a different connection, `--limit 10`
 
 Get help with `sled-dog --help` or `sled-dog pr list --help`.
 
+## 🎫 Tickets and agents
+
+With a Sled Dog server (see the [repo README](../../README.md)), the CLI also manages tickets. Create a token on the web app's **API tokens** page, then:
+
+```sh
+echo "$TOKEN" | sled-dog server login --url https://sled-dog.example.com --with-token
+```
+
+| Task | Command |
+| --- | --- |
+| List tickets | `sled-dog ticket list --status in_review` |
+| One ticket, with linked pull requests | `sled-dog ticket view SD-12` |
+| Create | `sled-dog ticket create "Fix login" --priority high` |
+| Update | `sled-dog ticket update SD-12 --status done` |
+| Preview any write | add `--dry-run` |
+| Pull GitHub now | `sled-dog server sync` |
+
+Built for agents: every command takes `--json`, writes can be previewed with `--dry-run`, and `ticket create` sends an idempotency key (printed in `meta`, or set your own with `--idempotency-key`) so a retry never creates a duplicate. The server URL must be HTTPS, except `localhost` for development. Tokens are kept in your OS credential store; automation can use `SLED_DOG_SERVER` and `SLED_DOG_API_TOKEN` instead. A token can never do more than the person who made it. Details: [reference](docs/reference.md#tickets).
+
 ## Troubleshooting
 
 - **Login appears stuck:** hidden input shows nothing. Paste and press Return, or use the macOS `pbpaste` command above.
@@ -95,6 +114,6 @@ python3 -m venv .venv
 .venv/bin/python -m unittest discover -s tests -v
 ```
 
-The source launcher uses the checkout's existing `.venv`; shell activation is optional. The CLI runs independently of the future web app.
+The source launcher uses the checkout's existing `.venv`; shell activation is optional. The GitHub commands run independently of the web app; no server is needed.
 
 See the [development notes](docs/reference.md#development-and-scope) and [release process](docs/reference.md#building-and-publishing-standalone-releases) for packaging, supported platforms, and tap updates.
