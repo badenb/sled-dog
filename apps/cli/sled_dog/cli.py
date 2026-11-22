@@ -55,6 +55,8 @@ def parser():
     for name in ('view','checks'):
         p = pr.add_parser(name, parents=[common])
         p.add_argument('reference', help='OWNER/REPO#NUMBER or HTTPS PR URL')
+    from . import platform
+    platform.add_parsers(subs, common, Parser)
     return root
 
 
@@ -80,7 +82,7 @@ def envelope(data=None, meta=None, errors=None):
     return {'schema_version':1, 'data':data, 'meta':meta or {}, 'errors':errors or []}
 
 
-def run(args, config, secrets_factory=Secrets, github_factory=None):
+def run(args, config, secrets_factory=Secrets, github_factory=None, platform_factory=None):
     if args.command == 'doctor':
         import ssl
         import httpx
@@ -93,6 +95,9 @@ def run(args, config, secrets_factory=Secrets, github_factory=None):
             credential_store = 'unavailable; use SLED_DOG_TOKEN with --host on headless systems'
         return envelope({'version':__version__, 'platform':sys.platform, 'standalone':bool(getattr(sys, 'frozen', False)),
                          'credential_store':credential_store, 'eastern_timezone':eastern_time('2026-07-15T20:30:00Z')}, {'complete':True}), 0
+    if args.command in ('ticket', 'server'):
+        from . import platform
+        return platform.run(args, config, secrets_factory, **({'platform_factory': platform_factory} if platform_factory else {}))
     selected = None
     if args.command == 'pr' and args.action != 'list':
         selected = reference(args.reference, args.host)
@@ -365,7 +370,19 @@ def render(result, color='auto'):
     if meta.get('host'):
         console.print(safe(f"{meta['host']} / {meta.get('account') or 'no active account'}"), style='dim')
     console.print()
-    if isinstance(data, list):
+    if meta.get('kind') == 'tickets':
+        from .platform import render_tickets
+        if isinstance(data, list) and not data:
+            console.print('No tickets.')
+        else:
+            render_tickets(data, console, safe)
+        if meta.get('dry_run'):
+            console.print('Dry run: nothing was written.', style='yellow')
+    elif isinstance(data, dict) and data.get('action') == 'server-login':
+        console.print(safe(f"Connected to {data['url']}."), style='green')
+    elif isinstance(data, dict) and set(data) == {'url'}:
+        console.print(safe(f"Server: {data['url']}"))
+    elif isinstance(data, list):
         if not data:
             console.print('No results.')
         if meta.get('view') == 'reviews' and data:
