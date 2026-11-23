@@ -15,6 +15,7 @@ const { canSync, ready, hint, lastSyncedAt, running, run } = await useSync()
           <NuxtLink v-if="me.can['team:invite']" to="/team">Team</NuxtLink>
           <NuxtLink to="/settings/github">GitHub</NuxtLink>
           <NuxtLink to="/settings/tokens">API tokens</NuxtLink>
+          <NuxtLink to="/codex">Codex</NuxtLink>
         </nav>
         <div class="tools">
           <ClientOnly><span v-if="lastSyncedAt" class="sync-note">Synced {{ timeAgo(lastSyncedAt) }}</span></ClientOnly>
