@@ -104,6 +104,8 @@ Built for agents: every command takes `--json`, writes can be previewed with `--
 
 ## Troubleshooting
 
+- **"Internal error (…)" or "Cannot complete request":** re-run the same command with `SLED_DOG_DEBUG=1` to print the full traceback to stderr (JSON on stdout stays one clean document). "Internal error" means a bug in sled-dog, not your setup, so please report it with that traceback. The traceback can contain paths or other details, so look it over before pasting it publicly.
+
 - **Login appears stuck:** hidden input shows nothing. Paste and press Return, or use the macOS `pbpaste` command above.
 - **Homebrew reports outdated Command Line Tools:** update them through System Settings → General → Software Update.
 - **Upgrade still shows an older version:** exit any active development venv with `deactivate`, then check `command -v sled-dog` and `sled-dog --version`.

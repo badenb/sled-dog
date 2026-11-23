@@ -449,6 +449,24 @@ def render(result, color='auto'):
         console.print(safe(error['message']), style='red')
 
 
+# Failures caused by the machine or network (a file, a socket, a bad value) versus bugs in this program.
+# Telling them apart matters: the first deserves "check your setup", the second deserves "report this".
+ENVIRONMENT_ERRORS = (OSError, ValueError)
+PROGRAMMING_ERRORS = (TypeError, KeyError, AttributeError, IndexError)
+
+
+def unexpected(exc, message):
+    """An envelope for an unexpected error. The exception's own text is never shown by default: it can
+    hold paths, URLs, or other details nobody asked to print. SLED_DOG_DEBUG=1 opts in to the full
+    traceback, on stderr, so a JSON document on stdout stays a single clean document."""
+    if os.environ.get('SLED_DOG_DEBUG', '').lower() in ('1', 'true', 'yes'):
+        import traceback
+        traceback.print_exception(exc, file=sys.stderr)
+    else:
+        message += ' Re-run with SLED_DOG_DEBUG=1 for details.'
+    return envelope(errors=[{'message': message, 'code': 1, 'type': type(exc).__name__}]), 1
+
+
 def main(argv=None):
     argv = list(sys.argv[1:] if argv is None else argv)
     wants_json = '--json' in argv
@@ -466,8 +484,10 @@ def main(argv=None):
         result, code = envelope(errors=[{'message':str(exc), 'code':exc.code}]), exc.code
     except KeyboardInterrupt:
         result, code = envelope(errors=[{'message':'Interrupted.', 'code':130}]), 130
-    except (OSError, ValueError, TypeError, KeyError, AttributeError, IndexError):
-        result, code = envelope(errors=[{'message':'Cannot complete request. Check configuration and host response.', 'code':1}]), 1
+    except ENVIRONMENT_ERRORS as exc:
+        result, code = unexpected(exc, 'Cannot complete request. Check configuration and host response.')
+    except PROGRAMMING_ERRORS as exc:
+        result, code = unexpected(exc, f'Internal error ({type(exc).__name__}): this is a bug in sled-dog, not your setup.')
     if wants_json:
         print(json.dumps(result, ensure_ascii=True))
     else:
