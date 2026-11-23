@@ -47,7 +47,17 @@ class Platform:
         except httpx.HTTPError:
             raise Failure('Cannot reach the Sled Dog server. Check the URL and your network.') from None
         status = response.status_code
-        if status in (401, 403):
+        if status == 403:
+            # Our server says WHY (for example, only the assignee or their team can complete a step). Show it, so
+            # nobody is sent to re-login for what is really a permission rule. Never echo anything else.
+            try:
+                reason = response.json().get('statusMessage')
+            except ValueError:
+                reason = None
+            if isinstance(reason, str) and reason.strip():
+                raise Failure(f'Not allowed: {reason.strip()[:200]}', 3)
+            raise Failure('Server rejected the token or its scope. Run sled-dog server login.', 3)
+        if status == 401:
             raise Failure('Server rejected the token or its scope. Run sled-dog server login.', 3)
         if status == 404:
             raise Failure('Not found on the Sled Dog server.', 1)
@@ -126,6 +136,105 @@ def add_parsers(subs, common, Parser):
     p.add_argument('--dry-run', action='store_true')
 
 
+    step = subs.add_parser('step', help="Work a ticket's trail of checkpoints (design, copy, approvals...)").add_subparsers(dest='action', required=True)
+    p = step.add_parser('add', parents=[common], help='Add a checkpoint to the end of the trail')
+    p.add_argument('ticket', help='Ticket, e.g. SD-12')
+    p.add_argument('title')
+    p.add_argument('--team', help='Assign to a team by name')
+    p.add_argument('--assignee', help='Assign to a person (name, email, or the part before the @)')
+    p.add_argument('--dry-run', action='store_true', help='Show what would happen without writing')
+    p.add_argument('--idempotency-key', help='Retry-safe key (generated if omitted and printed in meta)')
+    for name, text in (('done', 'Mark a checkpoint done'), ('reopen', 'Mark a done checkpoint not done'), ('remove', 'Remove a checkpoint')):
+        p = step.add_parser(name, parents=[common], help=text)
+        p.add_argument('ticket')
+        p.add_argument('step', help='Its number in the trail (as shown by ticket view) or its name')
+        p.add_argument('--dry-run', action='store_true')
+    p = step.add_parser('assign', parents=[common], help='Assign a checkpoint to a team or person')
+    p.add_argument('ticket')
+    p.add_argument('step', help='Its number in the trail or its name')
+    who = p.add_mutually_exclusive_group(required=True)
+    who.add_argument('--team', help='Team name')
+    who.add_argument('--assignee', help='Person: name, email, or the part before the @')
+    who.add_argument('--unassign', action='store_true')
+    p.add_argument('--dry-run', action='store_true')
+
+
+def resolve_step(steps, ref):
+    """A step is addressed by its number in the trail (as ticket view shows it) or by its name."""
+    steps = sorted(steps, key=lambda s: s['position'])
+    if re.fullmatch(r'[1-9][0-9]*', ref):
+        index = int(ref)
+        if index > len(steps):
+            raise Failure(f'The trail has {len(steps)} step(s); there is no step {index}.', 2)
+        return steps[index - 1]
+    low = ref.lower()
+    found = [s for s in steps if s['title'].lower() == low] or [s for s in steps if low in s['title'].lower()]
+    if not found:
+        raise Failure(f'No step matches "{ref}". Use its number or name from ticket view.', 2)
+    if len(found) > 1:
+        raise Failure(f'"{ref}" matches several steps ({", ".join(s["title"] for s in found)}). Use its number.', 2)
+    return found[0]
+
+
+def resolve_team(client, name):
+    teams = client.request('GET', '/api/teams')['data']
+    for team in teams:
+        if team['name'].lower() == name.lower():
+            return team
+    raise Failure(f'No team named "{name}". Teams: {", ".join(t["name"] for t in teams) or "none yet"}.', 2)
+
+
+def resolve_person(client, who):
+    """A person by email, full name, the part before the @, or a name part ("dana"). Never guesses between two."""
+    members = client.request('GET', '/api/members')['data']
+    key = who.lstrip('@').lower()
+    if '@' in key:
+        found = [m for m in members if m['email'].lower() == key]
+    else:
+        found = [m for m in members if key == m['name'].lower() or key == m['email'].split('@')[0].lower()
+                 or key in m['name'].lower().split()]
+    if not found:
+        raise Failure(f'No member matches "{who}". Use a name or email from the Team page.', 2)
+    if len(found) > 1:
+        raise Failure(f'"{who}" matches several people ({", ".join(m["email"] for m in found)}). Use an email.', 2)
+    return found[0]
+
+
+def run_step(client, args):
+    params = {'dry_run': '1'} if args.dry_run else None
+    ticket = ticket_ref(args.ticket)
+    base = f'/api/tickets/{ticket}/steps'
+    if args.action == 'add':
+        body = {'title': args.title}
+        if args.team:
+            body['teamId'] = resolve_team(client, args.team)['id']
+        if args.assignee:
+            body['assigneeId'] = resolve_person(client, args.assignee)['id']
+        key = args.idempotency_key or str(uuid.uuid4())
+        result = client.request('POST', base, params, body, idempotency_key=key)
+        result['meta']['idempotency_key'] = key
+        return result
+    steps = client.request('GET', f'/api/tickets/{ticket}')['data'].get('steps') or []
+    step = resolve_step(steps, args.step)
+    path = f"{base}/{step['id']}"
+    if args.action == 'remove':
+        result = client.request('DELETE', path, params)
+    else:
+        if args.action == 'done':
+            body = {'status': 'done'}
+        elif args.action == 'reopen':
+            body = {'status': 'todo'}
+        elif args.team:
+            body = {'teamId': resolve_team(client, args.team)['id'], 'assigneeId': None}
+        elif args.assignee:
+            body = {'assigneeId': resolve_person(client, args.assignee)['id'], 'teamId': None}
+        else:
+            body = {'assigneeId': None, 'teamId': None}
+        result = client.request('PATCH', path, params, body)
+    result['meta']['step_number'] = sorted(steps, key=lambda s: s['position']).index(step) + 1
+    return result
+
+
 def run_subtask(client, args):
     params = {'dry_run': '1'} if args.dry_run else None
     if args.action == 'add':
@@ -184,6 +293,10 @@ def run(args, config, secrets_factory, platform_factory=Platform, read_stdin=Non
 
     client = platform_factory(url, token)
     try:
+        if args.command == 'step':
+            result = run_step(client, args)
+            result['meta'] = dict(meta, **result.get('meta', {}), kind='steps')
+            return result, 0
         if args.command == 'subtask':
             result = run_subtask(client, args)
             result['meta'] = dict(meta, **result.get('meta', {}), kind='subtasks')
@@ -232,8 +345,54 @@ def render_tickets(data, console, safe):
                       safe(row.get('priority', '')), safe(row.get('assignee') or '-'), safe(row.get('title', '')))
     console.print(table)
     if not isinstance(data, list):
+        render_trail(data.get('steps') or [], console, safe)
         render_subtask_list(data.get('subtasks') or [], console, safe)
         render_pull_requests(data.get('pullRequests') or [], console, safe)
+
+
+def render_trail(steps, console, safe, show_header=True, pointer=True, start=1):
+    from rich.text import Text
+    if not steps:
+        return
+    steps = sorted(steps, key=lambda s: s['position'])
+    done = sum(1 for s in steps if s['status'] == 'done')
+    current = next((s for s in steps if s['status'] != 'done'), None)
+    if show_header:
+        console.print()
+        header = Text('Trail', style='bold')
+        header.append(f'  {done} of {len(steps)} checkpoints' + ('  🏁' if done == len(steps) else ''), style='dim')
+        console.print(header)
+    for number, step in enumerate(steps, start):
+        if step['status'] == 'done':
+            mark, style = '✓', 'green'
+        elif pointer and current is step:
+            mark, style = '●', 'bold magenta'
+        else:
+            mark, style = '○', 'dim'
+        line = Text(f'  {number}. ', style='dim')
+        line.append(mark + ' ', style=style)
+        line.append(safe(step['title']), style='dim strike' if step['status'] == 'done' else '')
+        who = step.get('team') and '👥 ' + step['team']['name'] or step.get('assignee') and '@' + step['assignee']['name']
+        if who:
+            line.append('  ' + safe(who), style='cyan')
+        if step['status'] == 'done' and step.get('completedBy'):
+            from .cli import pr_age
+            line.append(safe(f"  done by {step['completedBy']}" + (f" · {pr_age(step['completedAt'])} ago" if step.get('completedAt') else '')), style='dim')
+        elif pointer and current is step:
+            line.append('  ← you are here', style='magenta')
+        console.print(line)
+
+
+def render_steps(data, meta, console, safe):
+    from rich.text import Text
+    if 'deleted' in data:
+        verb = 'Would remove' if meta.get('dry_run') else 'Removed'
+        console.print(Text(safe(f"{verb} step \"{data.get('title', data['deleted'])}\"")), style='yellow' if meta.get('dry_run') else 'green')
+    else:
+        # One step on its own: keep its real number from the trail, and no "you are here" pointer.
+        render_trail([data], console, safe, show_header=False, pointer=False, start=meta.get('step_number', data.get('position', 1)))
+    if meta.get('dry_run'):
+        console.print('Dry run: nothing was written.', style='yellow')
 
 
 def pr_chips(prs, safe):

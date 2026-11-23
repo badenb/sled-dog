@@ -95,7 +95,7 @@ def run(args, config, secrets_factory=Secrets, github_factory=None, platform_fac
             credential_store = 'unavailable; use SLED_DOG_TOKEN with --host on headless systems'
         return envelope({'version':__version__, 'platform':sys.platform, 'standalone':bool(getattr(sys, 'frozen', False)),
                          'credential_store':credential_store, 'eastern_timezone':eastern_time('2026-07-15T20:30:00Z')}, {'complete':True}), 0
-    if args.command in ('ticket', 'server', 'subtask'):
+    if args.command in ('ticket', 'server', 'subtask', 'step'):
         from . import platform
         return platform.run(args, config, secrets_factory, **({'platform_factory': platform_factory} if platform_factory else {}))
     selected = None
@@ -373,6 +373,9 @@ def render(result, color='auto'):
     if meta.get('kind') == 'sync':
         from .platform import render_sync
         render_sync(data, console, safe)
+    elif meta.get('kind') == 'steps':
+        from .platform import render_steps
+        render_steps(data, meta, console, safe)
     elif meta.get('kind') == 'subtasks':
         from .platform import render_subtasks
         render_subtasks(data, meta, console, safe)
