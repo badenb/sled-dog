@@ -1,8 +1,15 @@
 <script setup lang="ts">
 import { TICKET_STATUSES, type Ticket } from '#shared/contract'
+import { trailProgress } from '#shared/trail'
 
-defineProps<{ ticket: Ticket, movable: boolean, dragging: boolean, moving: boolean }>()
-const emit = defineEmits<{ dragstart: [event: DragEvent], dragend: [], move: [status: Ticket['status']] }>()
+const props = defineProps<{ ticket: Ticket, movable: boolean, dragging: boolean, moving: boolean }>()
+const emit = defineEmits<{ dragstart: [event: DragEvent], dragend: [], move: [status: Ticket['status']], open: [rect: DOMRect] }>()
+
+const root = ref<HTMLElement>()
+function open() { if (root.value) emit('open', root.value.getBoundingClientRect()) }
+// Whole-card click for mouse users; the title button below is the keyboard path.
+function onClick(e: MouseEvent) { if (!(e.target as HTMLElement).closest('select, a, button')) open() }
+const trail = computed(() => trailProgress(props.ticket.steps ?? []))
 
 const prLabel = (pr: NonNullable<Ticket['pullRequests']>[number]) => (pr.draft ? 'Draft' : { open: 'Open', merged: 'Merged', closed: 'Closed' }[pr.state])
 const ci = { success: ['✓', 'checks passing'], failure: ['✕', 'checks failing'], pending: ['●', 'checks running'] } as const
@@ -11,8 +18,8 @@ const label = (s: string) => s.replace('_', ' ')
 
 <template>
   <article
-    :class="['card', { movable, dragging, moving }]" :draggable="movable && !moving"
-    @dragstart="emit('dragstart', $event)" @dragend="emit('dragend')"
+    ref="root" :class="['card', { movable, dragging, moving }]" :draggable="movable && !moving"
+    @dragstart="emit('dragstart', $event)" @dragend="emit('dragend')" @click="onClick"
   >
     <div class="card-top">
       <span class="id">{{ ticket.id }}</span>
@@ -24,7 +31,9 @@ const label = (s: string) => s.replace('_', ' ')
         <option v-for="s in TICKET_STATUSES.filter(s => s !== ticket.status)" :key="s" :value="s">{{ label(s) }}</option>
       </select>
     </div>
-    <div class="title">{{ ticket.title }}</div>
+    <button class="title" @click="open">{{ ticket.title }}</button>
+    <MiniTrail v-if="ticket.steps?.length" :steps="ticket.steps" />
+    <button v-if="trail.complete && movable && !['done', 'canceled'].includes(ticket.status)" class="nudge" @click="emit('move', 'done')">🏁 Trail complete · move to Done</button>
     <div v-if="ticket.priority !== 'none' || ticket.pullRequests?.length || ticket.assignee" class="card-foot">
       <span v-if="ticket.priority !== 'none'" :class="['pill', ticket.priority]"><span class="dot" />{{ ticket.priority }}</span>
       <a
