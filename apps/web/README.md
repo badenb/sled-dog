@@ -48,6 +48,17 @@ Done and Canceled tickets pile up. After a ticket has sat closed for a while it 
 - **API.** `GET /api/tickets` hides archived tickets by default; `?archived=only` or `?archived=all` includes them. `POST` and `DELETE` on `/api/tickets/SD-12/archive` archive and unarchive (both accept `?dry_run=1`). `GET`/`PUT /api/settings/archive` read and change the rule; changing it is owners only, browser sessions only, and `?dry_run=1` reports how many tickets the new rule would archive.
 - **The board says when it is cut off.** It loads at most 200 tickets; if there are more it shows how many it is hiding (`meta.truncated` and `meta.total` in the list response) rather than silently dropping the oldest.
 
+## Search
+
+`GET /api/search?q=login+redirect` finds tickets by **reference** (`SD-12`, or `SD-12.2` for a subtask that exists), **title**, **description**, **assignee**, and anything inside them: **subtask** titles and assignees, **trail step** titles, and **pull request** titles or `repo#number`. Anyone who can read tickets can search; it exposes nothing the list does not.
+
+- Every word must match (AND), in any order and in any field. Put a phrase in quotes to keep it together. Matching ignores case.
+- Archived tickets are **included** unless you pass `archived=exclude` (or `only`); finding old work is the point.
+- Best matches first: the ticket you named, then title matches, then assignee, then description, newest first. Each result says **why it matched** (`matchedIn`, e.g. `title`, `subtask SD-12.2`, `pull request #41`) and includes a short excerpt of the description.
+- Filters: `status`, `assignee`, `limit` (default 30, at most 100). The response reports `total` and `truncated`.
+- Limits: a query is at most 200 characters and 8 terms. `%`, `_` and `\` in what you type match themselves, and every value is a bound parameter, never spliced into SQL.
+- **How it works, and when to change it.** It is a `LIKE` search run across the tables at query time, so there is no index to keep in sync and search cannot go stale. Measured worst case (nothing matches, every table scanned, with subtasks, steps and a PR on every ticket): about 15 ms at 2,000 tickets and 70 ms at 10,000. SQLite's FTS5 is available if you outgrow that; search lives behind one function (`server/utils/search.ts`) so it can be swapped.
+
 ## Subtasks: several PRs on one ticket
 
 A ticket that needs several pull requests should not move to review the moment one of them opens. Split it into **subtasks** in the ticket sheet. Each gets a reference, `SD-12.1`, `SD-12.2`, and so on; numbers are never reused. Name a branch or PR `SD-12.2-api` and it links to that subtask only. Each subtask has its own status, assignee, and PRs, and moves like a ticket does.

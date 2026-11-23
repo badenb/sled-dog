@@ -379,12 +379,16 @@ def render(result, color='auto'):
     elif meta.get('kind') == 'subtasks':
         from .platform import render_subtasks
         render_subtasks(data, meta, console, safe)
+    elif meta.get('kind') == 'search':
+        from .platform import render_search
+        render_search(data, meta, console, safe)
     elif meta.get('kind') == 'tickets':
-        from .platform import render_tickets
+        from .platform import render_ticket_action, render_tickets
         if isinstance(data, list) and not data:
             console.print('No tickets.')
         else:
             render_tickets(data, console, safe)
+            render_ticket_action(data, meta, console, safe)
         if meta.get('dry_run'):
             console.print('Dry run: nothing was written.', style='yellow')
     elif isinstance(data, dict) and data.get('action') == 'server-login':
