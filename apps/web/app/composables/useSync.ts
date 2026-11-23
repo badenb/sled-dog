@@ -1,7 +1,7 @@
 import type { Envelope } from '#shared/contract'
 
 interface GhSettings { tokenConfigured: boolean, apiBase: string, sources: { kind: 'org' | 'repo', name: string, lastSyncedAt: string | null, lastError: string | null }[] }
-interface SyncRow { source: string, prsSeen: number, error: string | null, transitions: unknown[] }
+interface SyncRow { source: string, prsSeen: number, error: string | null, transitions: unknown[], note?: string | null }
 
 /** GitHub sync state shared by the header button and the GitHub settings page. */
 export async function useSync() {
@@ -31,7 +31,11 @@ export async function useSync() {
       const moved = res.data.reduce((n, r) => n + r.transitions.length, 0)
       const seen = res.data.reduce((n, r) => n + r.prsSeen, 0)
       if (failed.length) toast.push(failed.map(r => `${r.source}: ${r.error}`).join(' · '), 'error')
-      else toast.push(`Synced ${seen} pull request${seen === 1 ? '' : 's'}${moved ? ` · ${moved} ticket${moved === 1 ? '' : 's'} moved` : ''}`)
+      else {
+        // An organization that returned nothing may just be behind GitHub's search index: say so.
+        const hint = seen === 0 ? res.data.find(r => r.note)?.note : null
+        toast.push(`Synced ${seen} pull request${seen === 1 ? '' : 's'}${moved ? ` · ${moved} ticket${moved === 1 ? '' : 's'} moved` : ''}${hint ? `. ${hint}` : ''}`)
+      }
     } catch (e: any) {
       toast.push(e?.data?.statusMessage || 'Sync failed', 'error')
     } finally {

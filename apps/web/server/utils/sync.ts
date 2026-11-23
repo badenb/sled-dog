@@ -6,7 +6,12 @@ import { githubSources, pullRequests, subtaskLinks, subtasks, ticketLinks, ticke
 import { fetchPullRequests, GitHubError, type Fetch, type GitHubConfig } from './github'
 import { refreshSubtaskStatus, refreshTicketStatus, type Db, type Transition } from './status'
 
-export interface SourceResult { source: string, prsSeen: number, linked: number, transitions: Transition[], truncated: boolean, error: string | null }
+export interface SourceResult { source: string, prsSeen: number, linked: number, transitions: Transition[], truncated: boolean, error: string | null, note: string | null }
+
+// Organizations are read through GitHub's search index, which can trail a brand-new pull request by a few seconds.
+// Say so when it found nothing, so a "0" is not mistaken for "there is nothing".
+export const ORG_LAG_NOTE = "GitHub's search can lag a few seconds behind a brand-new pull request. If you just opened one, run sync again in a moment."
+
 
 const INITIAL_WINDOW_DAYS = 30
 const OVERLAP_MS = 5 * 60_000 // re-read a little history so a slow webhook/clock skew can't drop updates
@@ -84,12 +89,12 @@ export async function syncSource(
 
     // Only advance the cursor after a fully successful pass; a truncated read keeps the old cursor so nothing is skipped.
     await db.update(githubSources).set({ lastSyncedAt: truncated ? source.lastSyncedAt : startedAt, lastError: null }).where(eq(githubSources.id, source.id))
-    return { source: label, prsSeen: rows.length, linked, transitions, truncated, error: null }
+    return { source: label, prsSeen: rows.length, linked, transitions, truncated, error: null, note: source.kind === 'org' && rows.length === 0 ? ORG_LAG_NOTE : null }
   } catch (error) {
     const message = error instanceof GitHubError ? error.message : 'Sync failed unexpectedly.'
     if (!(error instanceof GitHubError)) console.error('[sled-dog] sync error', error)
     await db.update(githubSources).set({ lastError: message }).where(eq(githubSources.id, source.id))
-    return { source: label, prsSeen: 0, linked: 0, transitions: [], truncated: false, error: message }
+    return { source: label, prsSeen: 0, linked: 0, transitions: [], truncated: false, error: message, note: null }
   }
 }
 

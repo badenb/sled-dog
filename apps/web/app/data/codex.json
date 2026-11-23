@@ -128,7 +128,7 @@
         },
         {
           "title": "Pull GitHub now",
-          "note": "The server syncs every few minutes by itself. Run this to catch up right away. A pull request opened seconds ago can take about 15 seconds to appear, because GitHub's search lags a little.",
+          "note": "The server syncs every few minutes by itself. Run this to catch up right away. A repository source sees a new pull request immediately. An organization source reads GitHub's search, which can trail a brand-new pull request by a few seconds, and sync says so if it finds nothing.",
           "command": "sled-dog server sync"
         }
       ]
