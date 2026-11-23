@@ -70,3 +70,27 @@ export function matchedIn(ticket: Searchable, terms: string[]): string[] {
   for (const p of ticket.pullRequests ?? []) if (has(p.title) || has(p.key)) found.push(`pull request #${p.number}`)
   return found
 }
+
+const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+
+/**
+ * Split text into pieces, marking the ones that match a search term, so the page can highlight them. It returns
+ * plain text segments to render with <mark>, never HTML, so user-written titles cannot inject anything.
+ * Matching ignores case and uses the original text's own positions (lowercasing can change a string's length).
+ */
+export function highlightSegments(text: string, terms: string[]): { text: string, hit: boolean }[] {
+  const needles = terms.map(t => t.trim()).filter(Boolean).sort((a, b) => b.length - a.length)
+  if (!text || !needles.length) return [{ text, hit: false }]
+  const pattern = new RegExp(needles.map(escapeRegExp).join('|'), 'gi')
+  const segments: { text: string, hit: boolean }[] = []
+  let last = 0
+  for (const m of text.matchAll(pattern)) {
+    const start = m.index!
+    if (m[0].length === 0) continue
+    if (start > last) segments.push({ text: text.slice(last, start), hit: false })
+    segments.push({ text: m[0], hit: true })
+    last = start + m[0].length
+  }
+  if (last < text.length) segments.push({ text: text.slice(last), hit: false })
+  return segments.length ? segments : [{ text, hit: false }]
+}

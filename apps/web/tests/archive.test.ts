@@ -6,7 +6,7 @@ import { migrate } from 'drizzle-orm/libsql/migrator'
 import { eq, sql } from 'drizzle-orm'
 import * as schema from '../server/db/schema'
 import { archiveSettingInput } from '../shared/contract'
-import { archiveCutoff, closedAtFor, describeSetting, isArchivable, isClosed, subtractBusinessDays } from '../shared/archive'
+import { ARCHIVE_PRESETS, archiveCutoff, archiveDueAt, businessMoment, presetFor, closedAtFor, describeSetting, isArchivable, isClosed, subtractBusinessDays } from '../shared/archive'
 import { archiveDueTickets, archiveTicket, dueTickets, getArchiveSetting, saveArchiveSetting, unarchiveTicket } from '../server/utils/archive'
 import { refreshTicketStatus } from '../server/utils/status'
 
@@ -84,6 +84,83 @@ describe('archiveCutoff and isArchivable', () => {
     expect(describeSetting({ value: 1, unit: 'business_days' })).toBe('1 business day')
     expect(describeSetting({ value: 30, unit: 'days' })).toBe('30 days')
     expect(describeSetting({ value: 0, unit: 'days' })).toBe('never (manual only)')
+  })
+})
+
+describe('business days and the weekend (no business time passes on a weekend)', () => {
+  const rule = { value: 3, unit: 'business_days' as const }
+  const closedWed = { status: 'done' as const, closedAt: '2026-11-18T12:00:00.000Z', archivedAt: null } // Wednesday noon
+  const due = (now: string) => isArchivable(closedWed, archiveCutoff(new Date(now), rule))
+
+  it('a ticket closed Wednesday noon with 3 business days (Thu, Fri, Mon) is due Monday noon, not over the weekend', () => {
+    expect(due('2026-11-19T12:00:00Z')).toBe(false) // Thu
+    expect(due('2026-11-20T12:00:00Z')).toBe(false) // Fri
+    expect(due('2026-11-21T12:00:00Z')).toBe(false) // Sat: this used to say true
+    expect(due('2026-11-22T12:00:00Z')).toBe(false) // Sun: this used to say true
+    expect(due('2026-11-23T11:59:00Z')).toBe(false) // Mon, a minute early
+    expect(due('2026-11-23T12:00:00Z')).toBe(true) // Mon noon: exactly three business days
+  })
+  it('a weekend counts as the end of Friday', () => {
+    expect(businessMoment(new Date('2026-11-21T08:00:00Z')).toISOString()).toBe('2026-11-20T23:59:59.999Z') // Sat
+    expect(businessMoment(new Date('2026-11-22T23:00:00Z')).toISOString()).toBe('2026-11-20T23:59:59.999Z') // Sun
+    const weekday = new Date('2026-11-24T08:00:00Z')
+    expect(businessMoment(weekday)).toBe(weekday) // weekdays are untouched
+  })
+  it('the cutoff never moves backward as time passes, so "due" cannot flicker on and off', () => {
+    let previous = 0
+    for (let t = Date.UTC(2026, 10, 15); t < Date.UTC(2026, 10, 30); t += 3_600_000) {
+      const cutoff = archiveCutoff(new Date(t), rule)!.getTime()
+      expect(cutoff).toBeGreaterThanOrEqual(previous)
+      previous = cutoff
+    }
+  })
+  it('calendar days are unaffected by weekends', () => {
+    expect(archiveCutoff(new Date('2026-11-21T12:00:00Z'), { value: 3, unit: 'days' })!.toISOString()).toBe('2026-11-18T12:00:00.000Z')
+  })
+})
+
+describe('archiveDueAt (when a ticket becomes due, shown in the sheet)', () => {
+  const ticket = (closedAt: string) => ({ status: 'done' as const, closedAt, archivedAt: null })
+  const exact = (closedAt: string, rule: Parameters<typeof archiveCutoff>[1]) => {
+    const dueAt = archiveDueAt(closedAt, rule)!
+    // due at that moment, and not one millisecond earlier: it can never disagree with the archiver
+    expect(isArchivable(ticket(closedAt), archiveCutoff(dueAt, rule))).toBe(true)
+    expect(isArchivable(ticket(closedAt), archiveCutoff(new Date(dueAt.getTime() - 1), rule))).toBe(false)
+    return dueAt.toISOString()
+  }
+  it('calendar days: exactly N days later', () => {
+    expect(exact('2026-11-18T12:00:00.000Z', { value: 3, unit: 'days' })).toBe('2026-11-21T12:00:00.000Z')
+  })
+  it('business days: skips the weekend', () => {
+    expect(exact('2026-11-18T12:00:00.000Z', { value: 3, unit: 'business_days' })).toBe('2026-11-23T12:00:00.000Z') // Wed -> Mon
+    expect(exact('2026-11-20T15:00:00.000Z', { value: 1, unit: 'business_days' })).toBe('2026-11-23T15:00:00.000Z') // Fri -> Mon
+    expect(exact('2026-11-23T09:30:00.000Z', { value: 5, unit: 'business_days' })).toBe('2026-11-30T09:30:00.000Z') // Mon -> next Mon
+  })
+  it('a ticket closed over the weekend counts from the first business moment after it', () => {
+    exact('2026-11-21T10:00:00.000Z', { value: 1, unit: 'business_days' }) // Saturday
+    exact('2026-11-22T10:00:00.000Z', { value: 3, unit: 'business_days' }) // Sunday
+  })
+  it('is exact across many closing times and rules', () => {
+    for (const rule of [{ value: 1, unit: 'business_days' }, { value: 3, unit: 'business_days' }, { value: 10, unit: 'business_days' }, { value: 7, unit: 'days' }, { value: 365, unit: 'days' }] as const) {
+      for (let h = 0; h < 24 * 8; h += 5) exact(new Date(Date.UTC(2026, 10, 14) + h * 3_600_000).toISOString(), rule)
+    }
+  })
+  it('is null for never, and for an unreadable time', () => {
+    expect(archiveDueAt('2026-11-18T12:00:00.000Z', { value: 0, unit: 'days' })).toBeNull()
+    expect(archiveDueAt('not a date', { value: 3, unit: 'days' })).toBeNull()
+  })
+})
+
+describe('presets', () => {
+  it('offers the choices teams actually use, led by a few business days', () => {
+    expect(ARCHIVE_PRESETS.map(p => p.label)).toEqual(['3 business days', '5 business days', '2 weeks', '30 days', 'Never'])
+  })
+  it('recognises a setting as a preset, and 0 as never whatever its unit', () => {
+    expect(presetFor({ value: 5, unit: 'business_days' })?.label).toBe('5 business days')
+    expect(presetFor({ value: 14, unit: 'days' })?.label).toBe('2 weeks')
+    expect(presetFor({ value: 0, unit: 'business_days' })?.label).toBe('Never')
+    expect(presetFor({ value: 5, unit: 'days' })).toBeNull() // 5 calendar days is custom
+    expect(presetFor({ value: 4, unit: 'business_days' })).toBeNull()
   })
 })
 

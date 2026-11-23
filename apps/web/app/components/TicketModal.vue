@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { TICKET_PRIORITIES, TICKET_STATUSES, type Envelope, type Member, type Subtask, type Team, type Ticket, type TicketDetail, type Step } from '#shared/contract'
 import { trailProgress } from '#shared/trail'
+import { archiveDueAt, DEFAULT_ARCHIVE, isClosed, type ArchiveSetting } from '#shared/archive'
 
 export interface OriginRect { left: number, top: number, width: number, height: number }
 const props = defineProps<{ id: string, from: OriginRect | null }>()
@@ -18,6 +19,7 @@ const detail = ref<TicketDetail | null>(null)
 const members = ref<Member[]>([])
 const teams = ref<Team[]>([])
 const loadError = ref('')
+const rule = ref<ArchiveSetting>(DEFAULT_ARCHIVE)
 watch(() => detail.value?.id, async () => { await nextTick(); if (titleEl.value) grow(titleEl.value) })
 
 const canTicket = computed(() => !!me.value?.can['ticket:update'])
@@ -27,12 +29,13 @@ const reduceMotion = () => window.matchMedia('(prefers-reduced-motion: reduce)')
 
 async function load() {
   try {
-    const [t, m, tm] = await Promise.all([
+    const [t, m, tm, ar] = await Promise.all([
       $fetch<Envelope<TicketDetail>>(`/api/tickets/${props.id}`),
       $fetch<Envelope<Member[]>>('/api/members'),
       $fetch<Envelope<Team[]>>('/api/teams'),
+      $fetch<Envelope<ArchiveSetting>>('/api/settings/archive'),
     ])
-    detail.value = t.data; members.value = m.data; teams.value = tm.data
+    detail.value = t.data; members.value = m.data; teams.value = tm.data; rule.value = { value: ar.data.value, unit: ar.data.unit }
   } catch (e: any) {
     loadError.value = e?.data?.statusMessage || 'Could not load this ticket'
   }
@@ -111,6 +114,25 @@ function celebrate() {
   setTimeout(() => { celebrating.value = false }, 2400)
 }
 const paws = Array.from({ length: 14 }, (_, i) => ({ left: 6 + ((i * 67) % 88), delay: (i % 7) * 90, size: 16 + ((i * 5) % 14) }))
+// ── archive ──
+const closed = computed(() => !!detail.value && isClosed(detail.value.status))
+const archived = computed(() => !!detail.value?.archivedAt)
+const dueAt = computed(() => (closed.value && !archived.value && detail.value?.closedAt ? archiveDueAt(detail.value.closedAt, rule.value) : null))
+const busyArchive = ref(false)
+async function setArchived(on: boolean) {
+  if (busyArchive.value || !detail.value) return
+  busyArchive.value = true
+  try {
+    const res = await api<Envelope<Ticket>>(`/api/tickets/${props.id}/archive`, { method: on ? 'POST' : 'DELETE' })
+    detail.value = { ...detail.value, ...res.data, steps: detail.value.steps, subtasks: detail.value.subtasks, pullRequests: detail.value.pullRequests }
+    toast.push(on ? `Archived ${props.id}. It is off the board but still searchable.` : `${props.id} is back on the board.`)
+    emit('changed')
+  } catch (e: any) {
+    toast.push(e?.data?.statusMessage || 'Could not change the archive', 'error')
+  } finally {
+    busyArchive.value = false
+  }
+}
 const canFinish = computed(() => progress.value.complete && canTicket.value && detail.value && !['done', 'canceled'].includes(detail.value.status))
 </script>
 
@@ -120,6 +142,7 @@ const canFinish = computed(() => progress.value.complete && canTicket.value && d
       <header class="sheet-head">
         <span class="id">{{ id }}</span>
         <span v-if="detail" class="pill status-pill"><span class="dot" :style="{ background: `var(--s-${detail.status})` }" />{{ label(detail.status) }}</span>
+        <span v-if="archived" class="pill archived">Archived</span>
         <button class="ghost sm close" aria-label="Close" @click="close">✕</button>
       </header>
 
@@ -128,6 +151,10 @@ const canFinish = computed(() => progress.value.complete && canTicket.value && d
 
       <div v-else class="sheet-body">
         <div class="sheet-main">
+          <div v-if="archived" class="archived-banner" role="status">
+            <span><b>Archived</b> <ClientOnly>{{ timeAgo(detail.archivedAt!) }}</ClientOnly>. It is off the board but still searchable, with its subtasks, trail and pull requests.</span>
+            <button v-if="canTicket" class="sm" :disabled="busyArchive" @click="setArchived(false)">Unarchive</button>
+          </div>
           <textarea v-if="canTicket" ref="titleEl" class="sheet-title" rows="1" :value="detail.title" maxlength="200" aria-label="Title" @input="grow($event.target as HTMLTextAreaElement)" @blur="saveTitle" @keydown.enter.prevent="($event.target as HTMLTextAreaElement).blur()" />
           <h2 v-else class="sheet-title static">{{ detail.title }}</h2>
 
@@ -178,6 +205,17 @@ const canFinish = computed(() => progress.value.complete && canTicket.value && d
           </select>
           <label class="field-label" for="m-assignee">Assignee</label>
           <input id="m-assignee" :value="detail.assignee ?? ''" placeholder="login" :disabled="!canTicket" @blur="saveAssignee" @keydown.enter="($event.target as HTMLInputElement).blur()">
+          <div v-if="closed" class="archive-box">
+            <span class="field-label">Archive</span>
+            <template v-if="archived">
+              <p class="muted small">Off the board. Bringing it back restarts its closing time.</p>
+            </template>
+            <template v-else>
+              <p v-if="dueAt" class="muted small">Archives itself <ClientOnly>on {{ dueAt.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', timeZone: 'UTC' }) }} (UTC)</ClientOnly>. <NuxtLink v-if="me?.can['team:manage']" to="/settings/archive" @click="emit('close')">Change the rule</NuxtLink></p>
+              <p v-else class="muted small">Automatic archiving is off, so it stays on the board until someone archives it.</p>
+              <button v-if="canTicket" :disabled="busyArchive" @click="setArchived(true)">Archive now</button>
+            </template>
+          </div>
           <p class="muted small side-meta">Created by {{ detail.createdBy }}<br>Updated <ClientOnly>{{ timeAgo(detail.updatedAt) }}</ClientOnly></p>
         </aside>
       </div>
