@@ -1,5 +1,6 @@
-import { and, asc, eq, inArray } from 'drizzle-orm'
+import { and, asc, eq, inArray, sql } from 'drizzle-orm'
 import type { Subtask, SubtaskLite, Ticket } from '#shared/contract'
+import { statusFromSubtasks } from '../../shared/linking'
 import { useDb, schema } from '../db'
 import { toPrSummary } from './tickets'
 
@@ -40,4 +41,23 @@ export async function findSubtask(ticketNumber: number, number: string | undefin
   const row = await db.select().from(schema.subtasks).where(and(eq(schema.subtasks.ticketNumber, ticketNumber), eq(schema.subtasks.number, n))).get()
   if (!row) throw createError({ statusCode: 404, statusMessage: 'Subtask not found' })
   return row
+}
+
+export const isDryRun = (event: Parameters<typeof getQuery>[0]) => getQuery(event).dry_run === '1'
+
+/** The number the next subtask will get: a counter that only goes up, so numbers are never reused. */
+export async function nextSubtaskNumber(ticketNumber: number): Promise<number> {
+  const db = await useDb()
+  const [last] = await db.select({ max: sql<number>`coalesce(max(${schema.subtasks.number}), 0)` }).from(schema.subtasks).where(eq(schema.subtasks.ticketNumber, ticketNumber))
+  const ticket = await db.select({ seq: schema.tickets.subtaskSeq }).from(schema.tickets).where(eq(schema.tickets.number, ticketNumber)).get()
+  return Math.max(ticket?.seq ?? 0, last?.max ?? 0) + 1
+}
+
+/** Where the parent ticket would end up if the subtasks had these statuses. Read-only, for dry runs. */
+export async function predictTicketStatus(ticketNumber: number, statuses: Subtask['status'][]) {
+  const db = await useDb()
+  const ticket = await db.select().from(schema.tickets).where(eq(schema.tickets.number, ticketNumber)).get()
+  const current = (ticket?.status ?? 'backlog') as Subtask['status']
+  const to = statusFromSubtasks(current, statuses)
+  return { current, to, moved: to !== current ? { ticket: `SD-${ticketNumber}`, from: current, to } : null }
 }
