@@ -37,9 +37,21 @@ export function subtractBusinessDays(from: Date, n: number): Date {
 }
 
 /** Tickets closed at or before this moment are due for archiving. null means "never". */
+/** No business time passes on a weekend, so a Saturday or Sunday counts as the very end of Friday. */
+export function businessMoment(now: Date): Date {
+  const day = now.getUTCDay()
+  if (day !== 0 && day !== 6) return now
+  const friday = new Date(now)
+  friday.setUTCDate(friday.getUTCDate() - (day === 6 ? 1 : 2))
+  friday.setUTCHours(23, 59, 59, 999)
+  return friday
+}
+
 export function archiveCutoff(now: Date, setting: ArchiveSetting): Date | null {
   if (setting.value <= 0) return null
-  if (setting.unit === 'business_days') return subtractBusinessDays(now, setting.value)
+  // Without the weekend adjustment, Saturday stepped back one day lands on Friday and counts as a whole business
+  // day, so tickets were archived up to two days early.
+  if (setting.unit === 'business_days') return subtractBusinessDays(businessMoment(now), setting.value)
   const d = new Date(now)
   d.setUTCDate(d.getUTCDate() - setting.value)
   return d
@@ -51,3 +63,37 @@ export function isArchivable(ticket: { status: Status, closedAt: string | null, 
 
 export const describeSetting = (s: ArchiveSetting) =>
   s.value <= 0 ? 'never (manual only)' : `${s.value} ${s.unit === 'business_days' ? 'business day' : 'day'}${s.value === 1 ? '' : 's'}`
+
+/**
+ * The first moment a ticket closed at `closedAt` becomes due for archiving, or null if the rule is "never".
+ * Found by searching on archiveCutoff itself (which only ever moves forward), so this can never disagree with
+ * what the archiver does.
+ */
+export function archiveDueAt(closedAt: string, setting: ArchiveSetting): Date | null {
+  if (setting.value <= 0) return null
+  const closed = new Date(closedAt).getTime()
+  if (Number.isNaN(closed)) return null
+  const isDue = (t: number) => closed <= archiveCutoff(new Date(t), setting)!.getTime()
+  let low = closed
+  let high = closed + (setting.value * 2 + 14) * 86_400_000 // more than enough: n business days is at most about 1.4n + 4 calendar days
+  if (!isDue(high)) return null
+  while (high - low > 1) {
+    const mid = Math.floor((low + high) / 2)
+    if (isDue(mid)) high = mid
+    else low = mid
+  }
+  return new Date(high)
+}
+
+/** The choices offered in settings. Teams usually archive after a few business days; 30 days is the default. */
+export const ARCHIVE_PRESETS: { label: string, setting: ArchiveSetting }[] = [
+  { label: '3 business days', setting: { value: 3, unit: 'business_days' } },
+  { label: '5 business days', setting: { value: 5, unit: 'business_days' } },
+  { label: '2 weeks', setting: { value: 14, unit: 'days' } },
+  { label: '30 days', setting: { value: 30, unit: 'days' } },
+  { label: 'Never', setting: { value: 0, unit: 'days' } },
+]
+
+/** Which preset a setting is, if any (0 is "never" whatever its unit). */
+export const presetFor = (s: ArchiveSetting) =>
+  ARCHIVE_PRESETS.find(p => (s.value === 0 && p.setting.value === 0) || (p.setting.value === s.value && p.setting.unit === s.unit)) ?? null
