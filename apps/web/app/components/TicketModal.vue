@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { TICKET_PRIORITIES, TICKET_STATUSES, type Envelope, type Member, type Team, type Ticket, type TicketDetail, type Step } from '#shared/contract'
+import { TICKET_PRIORITIES, TICKET_STATUSES, type Envelope, type Member, type Subtask, type Team, type Ticket, type TicketDetail, type Step } from '#shared/contract'
 import { trailProgress } from '#shared/trail'
 
 export interface OriginRect { left: number, top: number, width: number, height: number }
@@ -78,7 +78,7 @@ async function patchTicket(body: Record<string, unknown>) {
   detail.value = { ...before, ...body } as TicketDetail
   try {
     const res = await $fetch<Envelope<Ticket>>(`/api/tickets/${props.id}`, { method: 'PATCH', body })
-    detail.value = { ...detail.value!, ...res.data, steps: detail.value!.steps, pullRequests: detail.value!.pullRequests }
+    detail.value = { ...detail.value!, ...res.data, steps: detail.value!.steps, subtasks: detail.value!.subtasks, pullRequests: detail.value!.pullRequests }
     emit('changed')
   } catch (e: any) {
     detail.value = before
@@ -103,6 +103,8 @@ function saveAssignee(e: Event) {
 // ── trail ──
 const celebrating = ref(false)
 function onSteps(steps: Step[]) { detail.value = { ...detail.value!, steps }; emit('changed') }
+function onSubtasks(subtasks: Subtask[]) { detail.value = { ...detail.value!, subtasks }; emit('changed') }
+function onTicketStatus(status: Ticket['status']) { if (detail.value && detail.value.status !== status) { detail.value = { ...detail.value, status }; emit('changed') } }
 function celebrate() {
   if (reduceMotion()) return
   celebrating.value = true
@@ -133,6 +135,11 @@ const canFinish = computed(() => progress.value.complete && canTicket.value && d
             :ticket-id="id" :steps="detail.steps" :members="members" :teams="teams"
             :can-add="!!me?.can['step:create']" :can-edit="!!me?.can['step:update']" :can-delete="!!me?.can['step:delete']"
             @update:steps="onSteps" @complete="celebrate"
+          />
+
+          <TicketSubtasks
+            :ticket-id="id" :subtasks="detail.subtasks" :can-edit="canTicket"
+            @update:subtasks="onSubtasks" @ticket-status="onTicketStatus"
           />
 
           <div v-if="progress.complete" class="finish">

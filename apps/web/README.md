@@ -26,13 +26,22 @@ An owner chooses one GitHub org or a list of repos under **GitHub** in the app. 
 
 - draft PR open → **in progress**
 - non-draft PR open → **in review**
-- no open PRs and at least one merged → **done**
+- no open PRs and at least one merged → **test** (merged code still needs verifying; a person moves it to **done**)
 
-Tickets only move forward, and `done`/`canceled` tickets are never changed by sync. Each automatic move is written to the audit log as `github-sync`. Trigger a sync from the app, or with `sled-dog server sync`.
+Tickets only move forward, nothing reaches `done` on its own, and `done`/`canceled` tickets are never changed by sync. Each automatic move is written to the audit log as `github-sync`. Trigger a sync from the app, or with `sled-dog server sync`.
+
+## Subtasks: several PRs on one ticket
+
+A ticket that needs several pull requests should not move to review the moment one of them opens. Split it into **subtasks** in the ticket sheet. Each gets a reference, `SD-12.1`, `SD-12.2`, and so on; numbers are never reused. Name a branch or PR `SD-12.2-api` and it links to that subtask only. Each subtask has its own status, assignee, and PRs, and moves like a ticket does.
+
+The ticket then **follows its subtasks**:
+- Work starting on any subtask moves the ticket to **in progress**.
+- It reaches **in review**, **test**, or **done** only when **every** (non-canceled) subtask has, so it is as far along as the slowest one.
+- A PR that names only `SD-12` is shown on the ticket but does not drive a ticket that has subtasks. A reference to a subtask that does not exist (`SD-12.9`) is ignored rather than attached to the parent.
 
 ## Tickets, trails and teams
 
-The board columns are fixed for everyone (backlog, todo, in progress, in review, done, canceled), so every team shares one language. What changes per ticket is its **trail**: an ordered list of checkpoints (design, copy, approvals, QA) that people add, rename, reorder (drag, or the arrow buttons), and assign to a person or a **team**. Click a card to open the ticket; the URL carries `?ticket=SD-12` so it can be shared.
+The board columns are fixed for everyone (backlog, todo, in progress, in review, test, done, canceled), so every team shares one language. What changes per ticket is its **trail**: an ordered list of checkpoints (design, copy, approvals, QA) that people add, rename, reorder (drag, or the arrow buttons), and assign to a person or a **team**. Click a card to open the ticket; the URL carries `?ticket=SD-12` so it can be shared.
 
 - **Who can complete a checkpoint:** owners and engineers can complete any of them. Anyone else (including the read-only stakeholder role) can complete a checkpoint assigned to them, or to a team they belong to, and nothing more: they still cannot rename, reassign, add, or delete. The server enforces this; the UI only hides what you cannot do.
 - **Teams** are named groups (Design, Legal) that owners create on the **Team** page. Deleting a team un-assigns its checkpoints rather than deleting them.

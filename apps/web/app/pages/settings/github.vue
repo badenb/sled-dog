@@ -42,7 +42,7 @@ const remove = (s: Source) => save(current().filter(x => !(x.kind === s.kind && 
 
     <section class="panel">
       <h2>How it works</h2>
-      <p class="muted">Mention a ticket like <code>SD-12</code> in a branch name, PR title or description. A draft PR moves it to <b>in progress</b>, an open PR to <b>in review</b>, and once merged it becomes <b>done</b>. Tickets only move forward.</p>
+      <p class="muted">Mention a ticket like <code>SD-12</code> in a branch name, PR title or description. A draft PR moves it to <b>in progress</b>, an open PR to <b>in review</b>, and once merged it moves to <b>test</b> for a person to verify and move to <b>done</b>. Tickets only move forward. If a ticket has subtasks (<code>SD-12.1</code>), it follows them instead.</p>
       <p v-if="settings?.tokenConfigured" class="muted small" style="margin-bottom: 0">Connected to {{ settings.apiBase }}</p>
     </section>
 

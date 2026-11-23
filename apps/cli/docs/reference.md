@@ -203,14 +203,14 @@ sled-dog ticket update SD-12 [--title TEXT] [--body TEXT] [--status STATUS] [--p
 sled-dog server sync
 ```
 
-Statuses: `backlog`, `todo`, `in_progress`, `in_review`, `done`, `canceled`. Priorities: `none`, `low`, `medium`, `high`, `urgent`. `--assignee ""` unassigns.
+Statuses: `backlog`, `todo`, `in_progress`, `in_review`, `test`, `done`, `canceled`. Priorities: `none`, `low`, `medium`, `high`, `urgent`. `--assignee ""` unassigns.
 
 - **Login** verifies the token against the server before saving it, then stores it in the native credential store under the server's host. `login` requires `--with-token` and piped input; never pass a token as an argument. For automation, set `SLED_DOG_SERVER` and `SLED_DOG_API_TOKEN` instead.
 - **Transport:** the server URL must be HTTPS, except `localhost`/`127.0.0.1` for development. URLs with credentials, queries, or fragments are refused. Redirects are never followed, so the token is never forwarded.
 - **Safe writes:** `--dry-run` returns what would change without writing (`meta.dry_run: true`). `ticket create` always sends an idempotency key, generated if you omit one and reported in `meta.idempotency_key`; retrying with the same key returns the original ticket instead of creating another.
 - **Permissions:** a token carries scopes (for example `ticket:read`, `ticket:create`, `ticket:update`) and can never exceed the permissions of the person who created it. It stops working if that person loses access. Rejected tokens or scopes exit with code 3, invalid field values with 2, and a missing ticket with 1.
 - **`ticket view`** lists linked pull requests with state, CI result, and review decision. Pull-request titles come from GitHub and are printed as plain text with terminal escapes removed.
-- **`server sync`** asks the server to pull pull requests from the GitHub org or repos its owner configured, link them to tickets (an `SD-<n>` mention in the branch, title, or description), and advance ticket status. It reports pull requests seen, new links, and tickets moved. It needs `ticket:update`.
+- **`server sync`** asks the server to pull pull requests from the GitHub org or repos its owner configured, link them to tickets (an `SD-<n>` mention in the branch, title, or description; `SD-<n>.<m>` links a subtask), and advance ticket status (merged work lands in `test`). It reports pull requests seen, new links, and tickets moved. It needs `ticket:update`.
 
 <a id="credentials"></a>
 

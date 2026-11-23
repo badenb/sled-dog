@@ -9,7 +9,7 @@ from urllib.parse import urlsplit
 
 from .config import Failure, now
 
-STATUSES = ['backlog', 'todo', 'in_progress', 'in_review', 'done', 'canceled']
+STATUSES = ['backlog', 'todo', 'in_progress', 'in_review', 'test', 'done', 'canceled']
 PRIORITIES = ['none', 'low', 'medium', 'high', 'urgent']
 LOCAL = ('localhost', '127.0.0.1', '::1')
 
@@ -170,7 +170,7 @@ def render_tickets(data, console, safe):
     from rich.table import Table
     from rich.text import Text
     rows = data if isinstance(data, list) else [data]
-    colors = {'backlog': 'bright_black', 'todo': 'blue', 'in_progress': 'yellow', 'in_review': 'magenta', 'done': 'green', 'canceled': 'red'}
+    colors = {'backlog': 'bright_black', 'todo': 'blue', 'in_progress': 'yellow', 'in_review': 'magenta', 'test': 'cyan', 'done': 'green', 'canceled': 'red'}
     table = Table(box=None, pad_edge=False, show_header=True, header_style='dim')
     for column in ('ID', 'Status', 'Priority', 'Assignee', 'Title'):
         table.add_column(column, overflow='fold')

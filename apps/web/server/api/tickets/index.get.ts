@@ -5,6 +5,7 @@ import { requirePermission } from '../../utils/auth'
 import { envelope } from '../../utils/envelope'
 import { toTicket, withPullRequests } from '../../utils/tickets'
 import { withSteps } from '../../utils/steps'
+import { withSubtasks } from '../../utils/subtasks'
 
 export default defineEventHandler(async (event) => {
   const actor = await requirePermission(event, 'ticket', 'read')
@@ -12,5 +13,5 @@ export default defineEventHandler(async (event) => {
   const db = await useDb()
   const filters = [q.status && eq(schema.tickets.status, q.status), q.assignee && eq(schema.tickets.assignee, q.assignee)].filter(Boolean) as ReturnType<typeof eq>[]
   const rows = await db.select().from(schema.tickets).where(and(...filters)).orderBy(desc(schema.tickets.updatedAt)).limit(q.limit)
-  return envelope(await withSteps(await withPullRequests(rows.map(toTicket)), actor), { limit: q.limit, complete: true })
+  return envelope(await withSubtasks(await withSteps(await withPullRequests(rows.map(toTicket)), actor)), { limit: q.limit, complete: true })
 })

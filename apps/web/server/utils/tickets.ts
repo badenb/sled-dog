@@ -5,7 +5,8 @@ import { useDb, schema } from '../db'
 export const ticketId = (number: number) => `SD-${number}`
 
 export function toTicket(row: typeof schema.tickets.$inferSelect): Ticket {
-  return { ...row, id: ticketId(row.number), status: row.status as Ticket['status'], priority: row.priority as Ticket['priority'] }
+  const { subtaskSeq: _internal, ...visible } = row // bookkeeping, not part of the API
+  return { ...visible, id: ticketId(row.number), status: row.status as Ticket['status'], priority: row.priority as Ticket['priority'] }
 }
 
 export function parseTicketRef(ref: string): number {
@@ -14,6 +15,11 @@ export function parseTicketRef(ref: string): number {
   return Number(match[1])
 }
 
+export const toPrSummary = (r: typeof schema.pullRequests.$inferSelect): PullRequestSummary => ({
+  key: r.key, repo: r.repo, number: r.number, title: r.title, url: r.url, state: r.state as PullRequestSummary['state'],
+  draft: r.draft, author: r.author, checks: r.checks as PullRequestSummary['checks'], reviewDecision: r.reviewDecision,
+})
+
 /** Attach linked pull requests (one extra query pair, not one per ticket). */
 export async function withPullRequests(list: Ticket[]): Promise<Ticket[]> {
   if (!list.length) return list
@@ -21,9 +27,6 @@ export async function withPullRequests(list: Ticket[]): Promise<Ticket[]> {
   const links = await db.select().from(schema.ticketLinks).where(inArray(schema.ticketLinks.ticketNumber, list.map(t => t.number)))
   if (!links.length) return list.map(t => ({ ...t, pullRequests: [] }))
   const rows = await db.select().from(schema.pullRequests).where(inArray(schema.pullRequests.key, [...new Set(links.map(l => l.prKey))]))
-  const byKey = new Map<string, PullRequestSummary>(rows.map(r => [r.key, {
-    key: r.key, repo: r.repo, number: r.number, title: r.title, url: r.url, state: r.state as PullRequestSummary['state'],
-    draft: r.draft, author: r.author, checks: r.checks as PullRequestSummary['checks'], reviewDecision: r.reviewDecision,
-  }]))
+  const byKey = new Map<string, PullRequestSummary>(rows.map(r => [r.key, toPrSummary(r)]))
   return list.map(t => ({ ...t, pullRequests: links.filter(l => l.ticketNumber === t.number).map(l => byKey.get(l.prKey)).filter((p): p is PullRequestSummary => !!p) }))
 }
