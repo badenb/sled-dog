@@ -9,7 +9,7 @@ import httpx
 
 from sled_dog.cli import parser, run
 from sled_dog.config import Config, Failure
-from sled_dog.platform import Platform, server_url, subtask_ref, ticket_ref
+from sled_dog.platform import Platform, resolve_step, server_url, subtask_ref, ticket_ref
 
 
 class Secrets:
@@ -39,8 +39,41 @@ class Harness(unittest.TestCase):
         args = parser().parse_args(text.split())
         return run(args, self.config, Secrets, platform_factory=self.factory(reply))
 
+    def routed(self, table):
+        def handler(request):
+            self.requests.append(request)
+            reply = table.get((request.method, request.url.path))
+            return httpx.Response(200, json=reply) if reply is not None else httpx.Response(404, json={})
+        return lambda base, token: Platform(base, token, transport=httpx.MockTransport(handler))
+
+    def call_routed(self, argv, table):
+        return run(parser().parse_args(argv), self.config, Secrets, platform_factory=self.routed(table))
+
     def call_argv(self, argv, reply):
         return run(parser().parse_args(argv), self.config, Secrets, platform_factory=self.factory(reply))
+
+
+class PermissionMessageTests(Harness):
+    def refuse(self, status, body):
+        factory = lambda base, token: Platform(base, token, transport=httpx.MockTransport(lambda request: httpx.Response(status, json=body)))
+        with self.assertRaises(Failure) as caught:
+            run(parser().parse_args(['ticket', 'list']), self.config, Secrets, platform_factory=factory)
+        return caught.exception
+
+    def test_a_403_shows_the_servers_reason_with_the_auth_exit_code(self):
+        error = self.refuse(403, {'statusMessage': 'Only the assignee, their team, or an engineer can complete this step'})
+        self.assertEqual(str(error), 'Not allowed: Only the assignee, their team, or an engineer can complete this step')
+        self.assertEqual(error.code, 3)
+
+    def test_a_403_without_a_reason_and_a_401_still_point_at_login(self):
+        for status, body in ((403, {}), (401, {'statusMessage': 'Invalid or revoked token'})):
+            error = self.refuse(status, body)
+            self.assertIn('sled-dog server login', str(error))
+            self.assertEqual(error.code, 3)
+
+    def test_the_reason_is_length_limited_and_only_a_string_is_trusted(self):
+        self.assertLessEqual(len(str(self.refuse(403, {'statusMessage': 'x' * 5000}))), 220)
+        self.assertIn('server login', str(self.refuse(403, {'statusMessage': {'nested': 'object'}})))
 
 
 class PlatformTests(Harness):
@@ -218,3 +251,149 @@ class SubtaskRenderTests(unittest.TestCase):
         self.assertIn('Removed SD-12.2', done)
         preview = self.render({'schema_version': 1, 'data': {'deleted': 2, 'ref': 'SD-12.2'}, 'errors': [], 'meta': {'kind': 'subtasks', 'dry_run': True}})
         self.assertIn('Would remove SD-12.2', preview)
+
+
+def env(data, meta=None):
+    return {'schema_version': 1, 'data': data, 'meta': meta or {}, 'errors': []}
+
+
+STEPS = [
+    {'id': 13, 'position': 3, 'title': 'Legal approval', 'status': 'todo', 'assignee': None, 'team': {'id': 't2', 'name': 'Legal'}},
+    {'id': 11, 'position': 1, 'title': 'Design', 'status': 'done', 'assignee': None, 'team': {'id': 't1', 'name': 'Design'}, 'completedBy': 'Dee', 'completedAt': '2026-11-20T10:00:00Z'},
+    {'id': 12, 'position': 2, 'title': 'Copy review', 'status': 'todo', 'assignee': {'id': 'u3', 'name': 'Baden'}, 'team': None},
+]
+TICKET = ('GET', '/api/tickets/SD-12')
+TABLE = {
+    TICKET: env({'id': 'SD-12', 'steps': STEPS}),
+    ('GET', '/api/teams'): env([{'id': 't1', 'name': 'Design', 'members': []}, {'id': 't2', 'name': 'Legal', 'members': []}]),
+    ('GET', '/api/members'): env([
+        {'id': 'u1', 'name': 'Dana Lee', 'email': 'dana@x.com', 'role': 'stakeholder'},
+        {'id': 'u2', 'name': 'Dana Smith', 'email': 'dsmith@x.com', 'role': 'engineer'},
+        {'id': 'u3', 'name': 'Baden', 'email': 'baden@x.com', 'role': 'owner'}]),
+    ('POST', '/api/tickets/SD-12/steps'): env({'id': 99, 'position': 4, 'title': 'QA', 'status': 'todo', 'assignee': None, 'team': None}),
+    ('PATCH', '/api/tickets/SD-12/steps/12'): env({'id': 12, 'position': 2, 'title': 'Copy review', 'status': 'done', 'assignee': None, 'team': None}),
+    ('DELETE', '/api/tickets/SD-12/steps/12'): env({'deleted': 12, 'title': 'Copy review'}),
+}
+
+
+class ResolveStepTests(unittest.TestCase):
+    def test_by_number_uses_the_order_ticket_view_shows_not_the_list_order(self):
+        self.assertEqual(resolve_step(STEPS, '1')['title'], 'Design')
+        self.assertEqual(resolve_step(STEPS, '3')['title'], 'Legal approval')
+
+    def test_by_name_exact_then_unique_substring_case_insensitively(self):
+        self.assertEqual(resolve_step(STEPS, 'design')['id'], 11)
+        self.assertEqual(resolve_step(STEPS, 'legal')['id'], 13)
+        self.assertEqual(resolve_step(STEPS, 'COPY REVIEW')['id'], 12)
+
+    def test_ambiguous_missing_and_out_of_range_are_clear_usage_errors(self):
+        for ref, expect in (('e', 'matches several'), ('nope', 'No step matches'), ('9', 'no step 9')):
+            with self.assertRaises(Failure) as caught:
+                resolve_step(STEPS, ref)
+            self.assertIn(expect, str(caught.exception))
+            self.assertEqual(caught.exception.code, 2)
+
+
+class StepCommandTests(Harness):
+    def test_add_resolves_the_team_and_person_by_name_and_sends_a_retry_key(self):
+        result, code = self.call_routed(['step', 'add', 'SD-12', 'QA', '--team', 'design', '--assignee', 'baden', '--idempotency-key', 'k1'], TABLE)
+        post = [r for r in self.requests if r.method == 'POST'][0]
+        self.assertEqual(json.loads(post.content), {'title': 'QA', 'teamId': 't1', 'assigneeId': 'u3'})
+        self.assertEqual(post.headers['idempotency-key'], 'k1')
+        self.assertEqual((code, result['meta']['kind'], result['meta']['idempotency_key']), (0, 'steps', 'k1'))
+
+    def test_add_with_an_unknown_team_fails_before_writing_anything(self):
+        with self.assertRaises(Failure) as caught:
+            self.call_routed(['step', 'add', 'SD-12', 'QA', '--team', 'Marketing'], TABLE)
+        self.assertIn('Teams: Design, Legal', str(caught.exception))
+        self.assertFalse([r for r in self.requests if r.method == 'POST'])
+
+    def test_an_ambiguous_person_is_refused_not_guessed(self):
+        with self.assertRaises(Failure) as caught:
+            self.call_routed(['step', 'add', 'SD-12', 'QA', '--assignee', 'dana'], TABLE)
+        self.assertIn('matches several people', str(caught.exception))
+        self.assertEqual(self.call_routed(['step', 'add', 'SD-12', 'QA', '--assignee', 'dsmith@x.com'], TABLE)[1], 0)  # an exact email is never ambiguous
+        self.assertEqual(self.call_routed(['step', 'add', 'SD-12', 'QA', '--assignee', 'Smith'], TABLE)[1], 0)  # a unique name part works
+
+    def test_done_looks_up_the_step_then_patches_it_and_reports_its_number(self):
+        result, _ = self.call_routed(['step', 'done', 'SD-12', 'copy'], TABLE)
+        patch = [r for r in self.requests if r.method == 'PATCH'][0]
+        self.assertEqual((patch.url.path, json.loads(patch.content)), ('/api/tickets/SD-12/steps/12', {'status': 'done'}))
+        self.assertEqual(result['meta']['step_number'], 2)
+
+    def test_reopen_sends_todo_and_dry_run_is_passed_to_the_server(self):
+        self.call_routed(['step', 'reopen', 'SD-12', '2', '--dry-run'], TABLE)
+        patch = [r for r in self.requests if r.method == 'PATCH'][0]
+        self.assertEqual(json.loads(patch.content), {'status': 'todo'})
+        self.assertEqual(patch.url.params['dry_run'], '1')
+
+    def test_assign_to_a_team_clears_the_person_and_the_reverse(self):
+        self.call_routed(['step', 'assign', 'SD-12', '2', '--team', 'Legal'], TABLE)
+        self.assertEqual(json.loads([r for r in self.requests if r.method == 'PATCH'][-1].content), {'teamId': 't2', 'assigneeId': None})
+        self.requests.clear()
+        self.call_routed(['step', 'assign', 'SD-12', '2', '--assignee', 'baden'], TABLE)
+        self.assertEqual(json.loads([r for r in self.requests if r.method == 'PATCH'][-1].content), {'assigneeId': 'u3', 'teamId': None})
+        self.requests.clear()
+        self.call_routed(['step', 'assign', 'SD-12', '2', '--unassign'], TABLE)
+        self.assertEqual(json.loads([r for r in self.requests if r.method == 'PATCH'][-1].content), {'assigneeId': None, 'teamId': None})
+
+    def test_assign_needs_exactly_one_target(self):
+        for argv in (['step', 'assign', 'SD-12', '2'], ['step', 'assign', 'SD-12', '2', '--team', 'Legal', '--unassign']):
+            with self.assertRaises(Failure) as caught:
+                parser().parse_args(argv)
+            self.assertEqual(caught.exception.code, 2)
+
+    def test_remove_sends_delete(self):
+        self.call_routed(['step', 'remove', 'SD-12', 'Copy review'], TABLE)
+        self.assertEqual([(r.method, r.url.path) for r in self.requests][-1], ('DELETE', '/api/tickets/SD-12/steps/12'))
+
+    def test_a_step_that_does_not_exist_makes_no_write(self):
+        with self.assertRaises(Failure):
+            self.call_routed(['step', 'done', 'SD-12', '7'], TABLE)
+        self.assertFalse([r for r in self.requests if r.method in ('PATCH', 'POST', 'DELETE')])
+
+
+class TrailRenderTests(unittest.TestCase):
+    def render(self, result):
+        import contextlib, io
+        from sled_dog.cli import render
+        buffer = io.StringIO()
+        with contextlib.redirect_stdout(buffer):
+            render(result, 'never')
+        return buffer.getvalue()
+
+    def view(self, steps):
+        ticket = {'id': 'SD-12', 'status': 'in_progress', 'priority': 'none', 'assignee': None, 'title': 'Launch', 'pullRequests': [], 'subtasks': [], 'steps': steps}
+        return self.render({'schema_version': 1, 'data': ticket, 'meta': {'kind': 'tickets'}, 'errors': []})
+
+    def test_ticket_view_shows_a_numbered_trail_with_where_you_are(self):
+        out = self.view(STEPS)
+        for expected in ('Trail', '1 of 3 checkpoints', '1. ✓ Design', '👥 Design', 'done by Dee', '2. ● Copy review', '@Baden', '← you are here', '3. ○ Legal approval', '👥 Legal'):
+            self.assertIn(expected, out)
+        self.assertLess(out.index('1. ✓'), out.index('2. ●'))
+        self.assertLess(out.index('2. ●'), out.index('3. ○'))
+
+    def test_a_finished_trail_shows_the_flag_and_no_pointer(self):
+        done = [dict(s, status='done', completedBy='X') for s in STEPS]
+        out = self.view(done)
+        self.assertIn('3 of 3 checkpoints  🏁', out)
+        self.assertNotIn('you are here', out)
+
+    def test_step_titles_are_untrusted_text(self):
+        out = self.view([dict(STEPS[0], title='\x1b[31mred\x1b[0m step')])
+        self.assertNotIn('\x1b', out)
+        self.assertIn('red step', out)
+
+    def test_a_ticket_with_no_trail_prints_no_trail_section(self):
+        self.assertNotIn('Trail', self.view([]))
+
+    def test_step_command_output(self):
+        step = dict(STEPS[0], status='done', completedBy='Eli')  # Legal approval, step 3
+        out = self.render({'schema_version': 1, 'data': step, 'errors': [], 'meta': {'kind': 'steps', 'step_number': 3, 'dry_run': True}})
+        self.assertIn('3. ✓ Legal approval', out)
+        self.assertIn('Dry run: nothing was written.', out)
+        todo = self.render({'schema_version': 1, 'data': STEPS[2], 'errors': [], 'meta': {'kind': 'steps', 'step_number': 2}})
+        self.assertIn('2. ○ Copy review', todo)
+        self.assertNotIn('you are here', todo)  # a lone step is not "where you are" in the trail
+        gone = self.render({'schema_version': 1, 'data': {'deleted': 12, 'title': 'Copy review'}, 'errors': [], 'meta': {'kind': 'steps'}})
+        self.assertIn('Removed step "Copy review"', gone)

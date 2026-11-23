@@ -92,6 +92,9 @@ echo "$TOKEN" | sled-dog server login --url https://sled-dog.example.com --with-
 | Create | `sled-dog ticket create "Fix login" --priority high` |
 | Update | `sled-dog ticket update SD-12 --status done` |
 | Preview any write | add `--dry-run` |
+| Add a checkpoint to a ticket's trail | `sled-dog step add SD-12 Design --team Design` |
+| Complete / reopen a checkpoint | `sled-dog step done SD-12 2` (number or name) |
+| Assign a checkpoint | `sled-dog step assign SD-12 3 --team Legal` |
 | Split a ticket into subtasks | `sled-dog subtask add SD-12 "API changes"` |
 | Change a subtask | `sled-dog subtask update SD-12.1 --status in_review` |
 | Remove a subtask | `sled-dog subtask remove SD-12.1` |

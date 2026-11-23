@@ -78,3 +78,14 @@ export function parseStepId(value: string | undefined): number {
   if (!Number.isInteger(id) || id < 1) throw createError({ statusCode: 400, statusMessage: 'Invalid step id' })
   return id
 }
+
+/** Display names for an assignee and team, for dry-run previews (what the step WOULD look like). */
+export async function describeParties(assigneeId?: string | null, teamId?: string | null): Promise<Pick<Step, 'assignee' | 'team'>> {
+  const db = await useDb()
+  const user = assigneeId ? await db.select().from(schema.user).where(eq(schema.user.id, assigneeId)).get() : undefined
+  const team = teamId ? await db.select().from(schema.teams).where(eq(schema.teams.id, teamId)).get() : undefined
+  return {
+    assignee: assigneeId ? { id: assigneeId, name: user?.name || user?.email || 'Unknown' } : null,
+    team: team ? { id: team.id, name: team.name } : null,
+  }
+}
