@@ -92,6 +92,9 @@ echo "$TOKEN" | sled-dog server login --url https://sled-dog.example.com --with-
 | Create | `sled-dog ticket create "Fix login" --priority high` |
 | Update | `sled-dog ticket update SD-12 --status done` |
 | Preview any write | add `--dry-run` |
+| Split a ticket into subtasks | `sled-dog subtask add SD-12 "API changes"` |
+| Change a subtask | `sled-dog subtask update SD-12.1 --status in_review` |
+| Remove a subtask | `sled-dog subtask remove SD-12.1` |
 | Pull GitHub now | `sled-dog server sync` |
 
 Built for agents: every command takes `--json`, writes can be previewed with `--dry-run`, and `ticket create` sends an idempotency key (printed in `meta`, or set your own with `--idempotency-key`) so a retry never creates a duplicate. The server URL must be HTTPS, except `localhost` for development. Tokens are kept in your OS credential store; automation can use `SLED_DOG_SERVER` and `SLED_DOG_API_TOKEN` instead. A token can never do more than the person who made it. Details: [reference](docs/reference.md#tickets).

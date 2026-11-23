@@ -12,6 +12,7 @@ from .config import Failure, now
 STATUSES = ['backlog', 'todo', 'in_progress', 'in_review', 'test', 'done', 'canceled']
 PRIORITIES = ['none', 'low', 'medium', 'high', 'urgent']
 LOCAL = ('localhost', '127.0.0.1', '::1')
+STATUS_COLORS = {'backlog': 'bright_black', 'todo': 'blue', 'in_progress': 'yellow', 'in_review': 'magenta', 'test': 'cyan', 'done': 'green', 'canceled': 'red'}
 
 
 def server_url(value):
@@ -69,6 +70,13 @@ def ticket_ref(value):
     return 'SD-' + match.group(1)
 
 
+def subtask_ref(value):
+    match = re.fullmatch(r'(?:SD-)?([1-9][0-9]*)\.([1-9][0-9]*)', value, re.I)
+    if not match:
+        raise Failure('Subtask reference must look like SD-12.2.', 2)
+    return 'SD-' + match.group(1), int(match.group(2))
+
+
 def add_parsers(subs, common, Parser):
     server = subs.add_parser('server').add_subparsers(dest='action', required=True)
     p = server.add_parser('login', parents=[common], help='Connect to a Sled Dog server')
@@ -98,6 +106,46 @@ def add_parsers(subs, common, Parser):
         p.add_argument('--dry-run', action='store_true', help='Show what would change without writing')
         if name == 'create':
             p.add_argument('--idempotency-key', help='Retry-safe key (generated if omitted and printed in meta)')
+
+
+    subtask = subs.add_parser('subtask', help='Split a ticket into subtasks (SD-12.1), each with its own PRs').add_subparsers(dest='action', required=True)
+    p = subtask.add_parser('add', parents=[common])
+    p.add_argument('ticket', help='Parent ticket, e.g. SD-12')
+    p.add_argument('title')
+    p.add_argument('--assignee', help='Login to assign')
+    p.add_argument('--dry-run', action='store_true', help='Show what would happen without writing')
+    p.add_argument('--idempotency-key', help='Retry-safe key (generated if omitted and printed in meta)')
+    p = subtask.add_parser('update', parents=[common])
+    p.add_argument('reference', help='Subtask, e.g. SD-12.2')
+    p.add_argument('--title')
+    p.add_argument('--status', choices=STATUSES)
+    p.add_argument('--assignee', help='Login to assign; empty string unassigns')
+    p.add_argument('--dry-run', action='store_true')
+    p = subtask.add_parser('remove', parents=[common])
+    p.add_argument('reference', help='Subtask, e.g. SD-12.2')
+    p.add_argument('--dry-run', action='store_true')
+
+
+def run_subtask(client, args):
+    params = {'dry_run': '1'} if args.dry_run else None
+    if args.action == 'add':
+        body = {'title': args.title}
+        if args.assignee is not None:
+            body['assignee'] = args.assignee or None
+        key = args.idempotency_key or str(uuid.uuid4())
+        result = client.request('POST', f'/api/tickets/{ticket_ref(args.ticket)}/subtasks', params, body, idempotency_key=key)
+        result['meta']['idempotency_key'] = key
+        return result
+    ticket, number = subtask_ref(args.reference)
+    path = f'/api/tickets/{ticket}/subtasks/{number}'
+    if args.action == 'remove':
+        return client.request('DELETE', path, params)
+    fields = {k: getattr(args, k) for k in ('title', 'status') if getattr(args, k, None) is not None}
+    if args.assignee is not None:
+        fields['assignee'] = args.assignee or None
+    if not fields:
+        raise Failure('Nothing to update. Pass at least one field.', 2)
+    return client.request('PATCH', path, params, fields)
 
 
 def run(args, config, secrets_factory, platform_factory=Platform, read_stdin=None):
@@ -136,6 +184,10 @@ def run(args, config, secrets_factory, platform_factory=Platform, read_stdin=Non
 
     client = platform_factory(url, token)
     try:
+        if args.command == 'subtask':
+            result = run_subtask(client, args)
+            result['meta'] = dict(meta, **result.get('meta', {}), kind='subtasks')
+            return result, 0
         if args.command == 'server':  # sync
             result = client.request('POST', '/api/sync')
             result['meta'] = dict(meta, **result.get('meta', {}), kind='sync')
@@ -170,7 +222,7 @@ def render_tickets(data, console, safe):
     from rich.table import Table
     from rich.text import Text
     rows = data if isinstance(data, list) else [data]
-    colors = {'backlog': 'bright_black', 'todo': 'blue', 'in_progress': 'yellow', 'in_review': 'magenta', 'test': 'cyan', 'done': 'green', 'canceled': 'red'}
+    colors = STATUS_COLORS
     table = Table(box=None, pad_edge=False, show_header=True, header_style='dim')
     for column in ('ID', 'Status', 'Priority', 'Assignee', 'Title'):
         table.add_column(column, overflow='fold')
@@ -180,7 +232,52 @@ def render_tickets(data, console, safe):
                       safe(row.get('priority', '')), safe(row.get('assignee') or '-'), safe(row.get('title', '')))
     console.print(table)
     if not isinstance(data, list):
+        render_subtask_list(data.get('subtasks') or [], console, safe)
         render_pull_requests(data.get('pullRequests') or [], console, safe)
+
+
+def pr_chips(prs, safe):
+    from rich.text import Text
+    states = {'open': 'green', 'merged': 'magenta', 'closed': 'red'}
+    marks = {'success': ' ✓', 'failure': ' ✕', 'pending': ' …'}
+    line = Text()
+    for pr in prs:
+        if len(line):
+            line.append('  ')
+        line.append(safe(f"#{pr['number']} {'draft' if pr.get('draft') else pr['state']}") + marks.get(pr.get('checks'), ''), style='yellow' if pr.get('draft') else states.get(pr['state'], ''))
+    return line
+
+
+def render_subtask_list(subtasks, console, safe):
+    from rich.table import Table
+    from rich.text import Text
+    if not subtasks:
+        return
+    console.print()
+    console.print('Subtasks', style='bold')
+    table = Table(box=None, pad_edge=False, show_header=False)
+    for _ in range(5):
+        table.add_column(overflow='fold')
+    for s in subtasks:
+        status = s.get('status', '')
+        table.add_row(Text(safe(s.get('ref', '')), style='cyan'), Text(safe(status.replace('_', ' ')), style=STATUS_COLORS.get(status, '')),
+                      safe(s.get('title', '')), Text(safe('@' + s['assignee']) if s.get('assignee') else '', style='dim'), pr_chips(s.get('pullRequests') or [], safe))
+    console.print(table)
+
+
+def render_subtasks(data, meta, console, safe):
+    from rich.text import Text
+    if 'deleted' in data:
+        ref = data.get('ref') or f"subtask {data['deleted']}"
+        console.print(Text(safe(('Would remove ' if meta.get('dry_run') else 'Removed ') + ref)), style='yellow' if meta.get('dry_run') else 'green')
+    else:
+        render_subtask_list([data], console, safe)
+    if meta.get('dry_run'):
+        console.print('Dry run: nothing was written.', style='yellow')
+    moved = meta.get('ticketMoved') or meta.get('wouldMoveTicket')
+    if moved:
+        verb = 'Would move' if meta.get('dry_run') else 'Ticket moved:'
+        console.print(safe(f"{verb} {moved['ticket']} {moved['from'].replace('_', ' ')} -> {moved['to'].replace('_', ' ')}"), style='cyan')
 
 
 def render_pull_requests(prs, console, safe):

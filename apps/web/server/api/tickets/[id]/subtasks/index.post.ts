@@ -4,7 +4,8 @@ import { useDb, schema } from '../../../../db'
 import { audit, requirePermission } from '../../../../utils/auth'
 import { envelope } from '../../../../utils/envelope'
 import { requireTicket } from '../../../../utils/steps'
-import { loadSubtasks, subtaskRef } from '../../../../utils/subtasks'
+import { remember, replay } from '../../../../utils/idempotency'
+import { isDryRun, loadSubtasks, nextSubtaskNumber, subtaskRef } from '../../../../utils/subtasks'
 import { parseTicketRef } from '../../../../utils/tickets'
 
 // Add a subtask. Numbers are per ticket (SD-12.1, SD-12.2, ...) and never reused, so a reference in an old PR stays meaningful.
@@ -13,8 +14,17 @@ export default defineEventHandler(async (event) => {
   const ticketNumber = parseTicketRef(getRouterParam(event, 'id') ?? '')
   const input = await readValidatedBody(event, subtaskCreate.parse)
   await requireTicket(ticketNumber)
-  const db = await useDb()
+  const { key, hit } = await replay(event, actor) // a retry with the same key returns the original subtask
+  if (hit) return hit
   const now = new Date().toISOString()
+  if (isDryRun(event)) {
+    const number = await nextSubtaskNumber(ticketNumber)
+    return envelope({
+      id: 0, ticketNumber, number, ref: subtaskRef(ticketNumber, number), title: input.title, status: 'todo',
+      assignee: input.assignee?.replace(/^@/, '') || null, pullRequests: [], createdAt: now, updatedAt: now,
+    }, { dry_run: true })
+  }
+  const db = await useDb()
   const row = await db.transaction(async (tx) => {
     const [last] = await tx.select({ max: sql<number>`coalesce(max(${schema.subtasks.number}), 0)` }).from(schema.subtasks).where(sql`${schema.subtasks.ticketNumber} = ${ticketNumber}`)
     const ticket = await tx.select({ seq: schema.tickets.subtaskSeq }).from(schema.tickets).where(eq(schema.tickets.number, ticketNumber)).get()
@@ -27,6 +37,8 @@ export default defineEventHandler(async (event) => {
     return created!
   })
   await audit(actor, 'subtask.create', subtaskRef(ticketNumber, row.number), { title: input.title })
+  const response = envelope((await loadSubtasks([ticketNumber])).get(ticketNumber)!.find(s => s.id === row.id))
+  await remember(key, actor, response)
   setResponseStatus(event, 201)
-  return envelope((await loadSubtasks([ticketNumber])).get(ticketNumber)!.find(s => s.id === row.id))
+  return response
 })
