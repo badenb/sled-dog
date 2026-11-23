@@ -10,6 +10,10 @@ function open() { if (root.value) emit('open', root.value.getBoundingClientRect(
 // Whole-card click for mouse users; the title button below is the keyboard path.
 function onClick(e: MouseEvent) { if (!(e.target as HTMLElement).closest('select, a, button')) open() }
 const trail = computed(() => trailProgress(props.ticket.steps ?? []))
+const subs = computed(() => {
+  const live = (props.ticket.subtasks ?? []).filter(s => s.status !== 'canceled')
+  return { total: live.length, reached: live.filter(s => ['in_review', 'test', 'done'].includes(s.status)).length }
+})
 
 const prLabel = (pr: NonNullable<Ticket['pullRequests']>[number]) => (pr.draft ? 'Draft' : { open: 'Open', merged: 'Merged', closed: 'Closed' }[pr.state])
 const ci = { success: ['✓', 'checks passing'], failure: ['✕', 'checks failing'], pending: ['●', 'checks running'] } as const
@@ -34,8 +38,9 @@ const label = (s: string) => s.replace('_', ' ')
     <button class="title" @click="open">{{ ticket.title }}</button>
     <MiniTrail v-if="ticket.steps?.length" :steps="ticket.steps" />
     <button v-if="trail.complete && movable && !['done', 'canceled'].includes(ticket.status)" class="nudge" @click="emit('move', 'done')">🏁 Trail complete · move to Done</button>
-    <div v-if="ticket.priority !== 'none' || ticket.pullRequests?.length || ticket.assignee" class="card-foot">
+    <div v-if="ticket.priority !== 'none' || ticket.pullRequests?.length || ticket.assignee || subs.total" class="card-foot">
       <span v-if="ticket.priority !== 'none'" :class="['pill', ticket.priority]"><span class="dot" />{{ ticket.priority }}</span>
+      <span v-if="subs.total" class="pill subs-pill" :title="`${subs.reached} of ${subs.total} subtasks are in review or beyond`">🧩 {{ subs.reached }}/{{ subs.total }}</span>
       <a
         v-for="pr in ticket.pullRequests" :key="pr.key" :href="pr.url" target="_blank" rel="noopener noreferrer"
         :class="['pr', pr.draft ? 'draft' : pr.state]" :title="`${pr.repo}#${pr.number}: ${pr.title}`"
