@@ -23,7 +23,7 @@ Local secrets go in the repo-root `.env` (gitignored). In production, set real e
 
 ## GitHub sync
 
-An owner chooses one GitHub org or a list of repos under **GitHub** in the app. Pull requests that reference a ticket (`SD-12` in the branch name or title, or after a keyword in the description) are linked to it and move it automatically:
+An owner chooses one GitHub org or a list of repos under **GitHub** in the app. A **repository** is read from its own pull-request list, so a new pull request appears the moment it exists; an **organization** is read through GitHub's search, which can trail a brand-new pull request by a few seconds (sync says so when it finds nothing, and the next run catches up). Pull requests that reference a ticket (`SD-12` in the branch name or title, or after a keyword in the description) are linked to it and move it automatically:
 
 - draft PR open → **in progress**
 - non-draft PR open → **in review**

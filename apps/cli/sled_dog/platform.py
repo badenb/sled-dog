@@ -557,5 +557,7 @@ def render_sync(data, console, safe):
             console.print(safe(f"  {move['ticket']}: {move['from'].replace('_', ' ')} -> {move['to'].replace('_', ' ')}"))
         if row.get('truncated'):
             console.print('  More PRs remain; run sync again.', style='yellow')
+        if row.get('note'):
+            console.print(safe('  ' + row['note']), style='yellow')
     if not data:
         console.print('No GitHub sources configured. Add one in the web app under GitHub.', style='yellow')

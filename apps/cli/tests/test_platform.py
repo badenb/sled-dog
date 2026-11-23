@@ -176,6 +176,23 @@ class RenderTests(unittest.TestCase):
         self.assertIn('review changes requested', out)
         self.assertNotIn('\x1b', out)  # untrusted PR titles cannot inject terminal escapes
 
+    def test_a_sync_note_is_shown_under_its_source(self):
+        rows = [{'source': 'acme', 'prsSeen': 0, 'linked': 0, 'transitions': [], 'truncated': False, 'error': None,
+                 'note': "GitHub's search can lag a few seconds behind a brand-new pull request."}]
+        out = self.render({'schema_version': 1, 'data': rows, 'meta': {'kind': 'sync'}, 'errors': []})
+        self.assertIn('acme: 0 PR(s) seen', out)
+        self.assertIn('search can lag', ' '.join(out.split()))
+
+    def test_a_note_is_untrusted_text_like_everything_else(self):
+        rows = [{'source': 'acme', 'prsSeen': 0, 'linked': 0, 'transitions': [], 'truncated': False, 'error': None, 'note': '\x1b[31mred\x1b[0m note'}]
+        out = self.render({'schema_version': 1, 'data': rows, 'meta': {'kind': 'sync'}, 'errors': []})
+        self.assertNotIn('\x1b', out)
+
+    def test_no_note_means_no_extra_line(self):
+        rows = [{'source': 'acme/web', 'prsSeen': 0, 'linked': 0, 'transitions': [], 'truncated': False, 'error': None, 'note': None}]
+        out = self.render({'schema_version': 1, 'data': rows, 'meta': {'kind': 'sync'}, 'errors': []})
+        self.assertNotIn('lag', out)
+
     def test_sync_summary_shows_moves_and_errors(self):
         rows = [{'source': 'acme', 'prsSeen': 2, 'linked': 1, 'truncated': False, 'error': None,
                  'transitions': [{'ticket': 'SD-1', 'from': 'todo', 'to': 'in_review'}]},
