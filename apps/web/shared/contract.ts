@@ -155,3 +155,15 @@ export const archiveSettingInput = z.object({
   value: z.number().int().min(0).max(365),
   unit: z.enum(['days', 'business_days']),
 })
+
+// ── Search ──
+export const searchQuery = z.object({
+  q: z.string().trim().min(1, 'Type something to search for').max(200, 'Keep the search under 200 characters'),
+  status: ticketStatus.optional(),
+  assignee: z.string().trim().max(100).optional(),
+  // Unlike the board, search looks at archived tickets too: finding old work is what it is for.
+  archived: z.enum(ARCHIVED_MODES).default('all'),
+  limit: z.coerce.number().int().min(1).max(100).default(30),
+})
+/** A ticket that matched, with why: which parts of it contain the terms, and an excerpt of the description. */
+export interface SearchResult extends Ticket { matchedIn: string[], snippet: string | null }

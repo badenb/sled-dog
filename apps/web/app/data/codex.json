@@ -72,6 +72,48 @@
       ]
     },
     {
+      "id": "finding",
+      "title": "Finding and archiving",
+      "intro": "Finished tickets leave the board after a while (the workspace owner sets how long, in days or business days). They are never deleted, and search always finds them.",
+      "items": [
+        {
+          "title": "Search everything",
+          "note": "Finds tickets that mention every word, in the reference, title, description, assignee, subtasks, trail steps or pull request titles. Best matches come first, and each result says why it matched. Archived tickets are included.",
+          "command": "sled-dog ticket search login redirect"
+        },
+        {
+          "title": "Search for an exact phrase",
+          "note": "Quote words to keep them together. Without quotes every word must appear, in any order.",
+          "command": "sled-dog ticket search \"third-party cookies\""
+        },
+        {
+          "title": "Jump to a ticket or subtask",
+          "note": "A reference finds that ticket first; SD-12.2 finds ticket 12 only if it has a subtask 2.",
+          "command": "sled-dog ticket search SD-12.2"
+        },
+        {
+          "title": "Narrow a search",
+          "note": "Filter by status or assignee. Add --live to hide archived tickets, or --archived to see only those.",
+          "command": "sled-dog ticket search checkout --status done --assignee baden"
+        },
+        {
+          "title": "Browse the archive",
+          "note": "ticket list shows the board by default. --archived shows only archived tickets; --all shows both.",
+          "command": "sled-dog ticket list --archived"
+        },
+        {
+          "title": "Archive a finished ticket",
+          "note": "Only a done or canceled ticket can be archived. It leaves the board but keeps its subtasks, trail and pull requests. Tickets also archive themselves once they have been closed long enough. --dry-run checks without changing anything.",
+          "command": "sled-dog ticket archive SD-12"
+        },
+        {
+          "title": "Bring a ticket back",
+          "note": "Its closing time restarts, so it is not archived again at once. Moving a ticket out of done also brings it back to the board.",
+          "command": "sled-dog ticket unarchive SD-12"
+        }
+      ]
+    },
+    {
       "id": "linking",
       "title": "Linking pull requests",
       "intro": "Sync reads your pull requests and links them to tickets by reference. How you name things decides what links.",

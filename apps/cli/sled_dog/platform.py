@@ -29,6 +29,15 @@ def credential_host(url):
     return urlsplit(url).netloc.lower()
 
 
+def server_reason(response):
+    """The short human reason our own server puts in statusMessage, or None. Only a plain string, length-limited."""
+    try:
+        reason = response.json().get('statusMessage')
+    except (ValueError, AttributeError):
+        return None
+    return reason.strip()[:200] if isinstance(reason, str) and reason.strip() else None
+
+
 class Platform:
     def __init__(self, base, token, transport=None):
         import httpx
@@ -50,12 +59,9 @@ class Platform:
         if status == 403:
             # Our server says WHY (for example, only the assignee or their team can complete a step). Show it, so
             # nobody is sent to re-login for what is really a permission rule. Never echo anything else.
-            try:
-                reason = response.json().get('statusMessage')
-            except ValueError:
-                reason = None
-            if isinstance(reason, str) and reason.strip():
-                raise Failure(f'Not allowed: {reason.strip()[:200]}', 3)
+            reason = server_reason(response)
+            if reason:
+                raise Failure(f'Not allowed: {reason}', 3)
             raise Failure('Server rejected the token or its scope. Run sled-dog server login.', 3)
         if status == 401:
             raise Failure('Server rejected the token or its scope. Run sled-dog server login.', 3)
@@ -64,7 +70,11 @@ class Platform:
         if 300 <= status < 400:
             raise Failure('Server redirected the request. Update the server URL; credentials were not forwarded.')
         if status in (400, 422):
-            raise Failure('Server rejected the request: check field values.', 2)
+            reason = server_reason(response)
+            raise Failure(f'Server rejected the request: {reason}' if reason else 'Server rejected the request: check field values.', 2)
+        if status == 409:
+            reason = server_reason(response)
+            raise Failure(f'Conflict: {reason}' if reason else 'Server request failed (HTTP 409).')
         if status >= 400:
             raise Failure(f'Server request failed (HTTP {status}).')
         try:
@@ -78,6 +88,14 @@ def ticket_ref(value):
     if not match:
         raise Failure('Ticket reference must look like SD-12.', 2)
     return 'SD-' + match.group(1)
+
+
+def query_from_args(parts):
+    """Rebuild the search the person typed. The shell removes quotes, so `search "third party"` arrives as ONE
+    argument containing a space: put the quotes back so the server treats it as a phrase, not two words.
+    An argument that already contains a double quote is left alone (it was quoted on purpose)."""
+    parts = [p.strip() for p in parts if p.strip()]  # blank arguments are nothing, not a phrase of spaces
+    return ' '.join(f'"{p}"' if re.search(r'\s', p) and '"' not in p else p for p in parts)
 
 
 def subtask_ref(value):
@@ -100,6 +118,21 @@ def add_parsers(subs, common, Parser):
     p.add_argument('--status', choices=STATUSES)
     p.add_argument('--assignee')
     p.add_argument('--limit', type=int, default=50)
+    scope = p.add_mutually_exclusive_group()
+    scope.add_argument('--archived', action='store_true', help='Show only archived tickets')
+    scope.add_argument('--all', action='store_true', help='Show live and archived tickets together')
+    p = ticket.add_parser('search', parents=[common], help='Find tickets by reference, words, assignee, or anything inside them')
+    p.add_argument('query', nargs='+', help='Words to find (all must match); "quote a phrase" to keep it together')
+    p.add_argument('--status', choices=STATUSES)
+    p.add_argument('--assignee')
+    p.add_argument('--limit', type=int, default=30)
+    scope = p.add_mutually_exclusive_group()
+    scope.add_argument('--archived', action='store_true', help='Only archived tickets')
+    scope.add_argument('--live', action='store_true', help='Hide archived tickets')
+    for name, text in (('archive', 'Take a done or canceled ticket off the board (nothing is deleted)'), ('unarchive', 'Bring an archived ticket back')):
+        p = ticket.add_parser(name, parents=[common], help=text)
+        p.add_argument('reference')
+        p.add_argument('--dry-run', action='store_true', help='Show what would happen without writing')
     p = ticket.add_parser('view', parents=[common])
     p.add_argument('reference')
     for name in ('create', 'update'):
@@ -305,11 +338,28 @@ def run(args, config, secrets_factory, platform_factory=Platform, read_stdin=Non
             result = client.request('POST', '/api/sync')
             result['meta'] = dict(meta, **result.get('meta', {}), kind='sync')
             return result, 0 if result['meta'].get('complete', True) else 4
+        kind = 'tickets'
         if args.action == 'list':
             if not 1 <= args.limit <= 200:
                 raise Failure('--limit must be between 1 and 200.', 2)
             params = {k: v for k, v in {'status': args.status, 'assignee': args.assignee, 'limit': args.limit}.items() if v}
+            if args.archived or args.all:  # the board hides archived tickets unless asked
+                params['archived'] = 'only' if args.archived else 'all'
             result = client.request('GET', '/api/tickets', params)
+        elif args.action == 'search':
+            if not 1 <= args.limit <= 100:
+                raise Failure('--limit must be between 1 and 100.', 2)
+            query = query_from_args(args.query)
+            if not query:
+                raise Failure('Type something to search for.', 2)
+            params = {k: v for k, v in {'q': query, 'status': args.status, 'assignee': args.assignee, 'limit': args.limit}.items() if v}
+            params['archived'] = 'only' if args.archived else 'exclude' if args.live else 'all'
+            result = client.request('GET', '/api/search', params)
+            kind = 'search'
+        elif args.action in ('archive', 'unarchive'):
+            path = f'/api/tickets/{ticket_ref(args.reference)}/archive'
+            result = client.request('POST' if args.action == 'archive' else 'DELETE', path, {'dry_run': '1'} if args.dry_run else None)
+            result['meta']['action'] = args.action
         elif args.action == 'view':
             result = client.request('GET', f'/api/tickets/{ticket_ref(args.reference)}')
         else:
@@ -327,7 +377,7 @@ def run(args, config, secrets_factory, platform_factory=Platform, read_stdin=Non
                 result = client.request('PATCH', f'/api/tickets/{ticket_ref(args.reference)}', params, fields)
     finally:
         client.close()
-    result['meta'] = dict(meta, **result.get('meta', {}), kind='tickets')
+    result['meta'] = dict(meta, **result.get('meta', {}), kind=kind)
     return result, 0 if result['meta'].get('complete', True) else 4
 
 
@@ -341,7 +391,10 @@ def render_tickets(data, console, safe):
         table.add_column(column, overflow='fold')
     for row in rows:
         status = row.get('status', '')
-        table.add_row(Text(safe(row.get('id', 'new')), style='cyan'), Text(safe(status.replace('_', ' ')), style=colors.get(status, '')),
+        status_cell = Text(safe(status.replace('_', ' ')), style=colors.get(status, ''))
+        if row.get('archivedAt'):
+            status_cell.append(' · archived', style='dim')
+        table.add_row(Text(safe(row.get('id', 'new')), style='cyan'), status_cell,
                       safe(row.get('priority', '')), safe(row.get('assignee') or '-'), safe(row.get('title', '')))
     console.print(table)
     if not isinstance(data, list):
@@ -437,6 +490,39 @@ def render_subtasks(data, meta, console, safe):
     if moved:
         verb = 'Would move' if meta.get('dry_run') else 'Ticket moved:'
         console.print(safe(f"{verb} {moved['ticket']} {moved['from'].replace('_', ' ')} -> {moved['to'].replace('_', ' ')}"), style='cyan')
+
+
+def render_ticket_action(data, meta, console, safe):
+    from rich.text import Text
+    dry = meta.get('dry_run')
+    if meta.get('action') == 'archive':
+        text = f"{'Would archive' if dry else 'Archived'} {data.get('id', '')}. It leaves the board but stays searchable."
+    elif meta.get('action') == 'unarchive':
+        text = f"{'Would bring' if dry else 'Brought'} {data.get('id', '')} back to the board. Its closing time restarts, so it is not archived again at once."
+    else:
+        return
+    console.print(Text(safe(text)), style='yellow' if dry else 'green')
+
+
+def render_search(data, meta, console, safe):
+    from rich.text import Text
+    if not data:
+        console.print(Text(safe(f"No tickets match \"{meta.get('q', '')}\".")))
+        console.print('Search looks at references, titles, descriptions, assignees, subtasks, trail steps and pull request titles.', style='dim')
+        return
+    for row in data:
+        status = row.get('status', '')
+        line = Text(safe(row['id']), style='cyan')
+        line.append('  ')
+        line.append(safe(status.replace('_', ' ')), style=STATUS_COLORS.get(status, ''))
+        if row.get('archivedAt'):
+            line.append(' · archived', style='dim')
+        line.append('  ' + safe(row.get('title', '')))
+        console.print(line)
+        why = Text('      matched: ' + safe(', '.join(row.get('matchedIn') or ['text'])), style='dim')
+        if row.get('snippet'):
+            why.append('  "' + safe(row['snippet']) + '"')
+        console.print(why)
 
 
 def render_pull_requests(prs, console, safe):

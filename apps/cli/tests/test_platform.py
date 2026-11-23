@@ -9,7 +9,7 @@ import httpx
 
 from sled_dog.cli import parser, run
 from sled_dog.config import Config, Failure
-from sled_dog.platform import Platform, resolve_step, server_url, subtask_ref, ticket_ref
+from sled_dog.platform import Platform, query_from_args, resolve_step, server_url, subtask_ref, ticket_ref
 
 
 class Secrets:
@@ -74,6 +74,30 @@ class PermissionMessageTests(Harness):
     def test_the_reason_is_length_limited_and_only_a_string_is_trusted(self):
         self.assertLessEqual(len(str(self.refuse(403, {'statusMessage': 'x' * 5000}))), 220)
         self.assertIn('server login', str(self.refuse(403, {'statusMessage': {'nested': 'object'}})))
+
+
+class ServerReasonTests(Harness):
+    def refuse(self, status, body):
+        factory = lambda base, token: Platform(base, token, transport=httpx.MockTransport(lambda request: httpx.Response(status, json=body)))
+        with self.assertRaises(Failure) as caught:
+            run(parser().parse_args(['ticket', 'list']), self.config, Secrets, platform_factory=factory)
+        return caught.exception
+
+    def test_a_409_shows_why_with_exit_code_1(self):
+        error = self.refuse(409, {'statusMessage': 'That ticket is already archived'})
+        self.assertEqual((str(error), error.code), ('Conflict: That ticket is already archived', 1))
+
+    def test_a_400_shows_the_servers_reason_with_the_usage_exit_code(self):
+        error = self.refuse(400, {'statusMessage': 'Use at most 8 search terms'})
+        self.assertEqual((str(error), error.code), ('Server rejected the request: Use at most 8 search terms', 2))
+
+    def test_without_a_reason_the_old_messages_remain(self):
+        self.assertEqual(str(self.refuse(400, {})), 'Server rejected the request: check field values.')
+        self.assertEqual(str(self.refuse(409, {})), 'Server request failed (HTTP 409).')
+
+    def test_only_a_short_string_is_ever_shown(self):
+        self.assertLessEqual(len(str(self.refuse(409, {'statusMessage': 'x' * 5000}))), 220)
+        self.assertEqual(str(self.refuse(409, {'statusMessage': {'a': 1}})), 'Server request failed (HTTP 409).')
 
 
 class PlatformTests(Harness):
@@ -397,3 +421,134 @@ class TrailRenderTests(unittest.TestCase):
         self.assertNotIn('you are here', todo)  # a lone step is not "where you are" in the trail
         gone = self.render({'schema_version': 1, 'data': {'deleted': 12, 'title': 'Copy review'}, 'errors': [], 'meta': {'kind': 'steps'}})
         self.assertIn('Removed step "Copy review"', gone)
+
+
+class QueryFromArgsTests(unittest.TestCase):
+    def test_separate_words_stay_separate_terms(self):
+        self.assertEqual(query_from_args(['login', 'redirect']), 'login redirect')
+
+    def test_a_shell_quoted_phrase_arrives_as_one_argument_and_is_quoted_again(self):
+        self.assertEqual(query_from_args(['third-party cookies']), '"third-party cookies"')
+        self.assertEqual(query_from_args(['fix', 'third party cookies', 'safari']), 'fix "third party cookies" safari')
+
+    def test_quotes_the_person_typed_on_purpose_are_left_alone(self):
+        self.assertEqual(query_from_args(['"login redirect" safari']), '"login redirect" safari')
+        self.assertEqual(query_from_args(['"exact phrase"']), '"exact phrase"')
+
+    def test_blank_input_is_blank(self):
+        self.assertEqual(query_from_args(['  ']), '')
+        self.assertEqual(query_from_args(['', ' ', 'login']), 'login')
+
+
+class SearchCommandTests(Harness):
+    found = env([{'id': 'SD-1', 'status': 'done', 'title': 'Fix login', 'archivedAt': None, 'matchedIn': ['title'], 'snippet': None}], {'q': 'login', 'total': 1})
+
+    def test_search_joins_words_and_looks_at_archived_tickets_by_default(self):
+        result, code = self.call_argv(['ticket', 'search', 'login', 'redirect'], self.found)
+        request = self.requests[0]
+        self.assertEqual((request.method, request.url.path), ('GET', '/api/search'))
+        self.assertEqual(dict(request.url.params), {'q': 'login redirect', 'archived': 'all', 'limit': '30'})
+        self.assertEqual((code, result['meta']['kind']), (0, 'search'))
+
+    def test_a_quoted_phrase_reaches_the_server_as_a_phrase(self):
+        self.call_argv(['ticket', 'search', 'third-party cookies'], self.found)
+        self.assertEqual(self.requests[0].url.params['q'], '"third-party cookies"')
+
+    def test_scope_filters_map_to_the_servers_archived_modes(self):
+        for flags, expected in ((['--archived'], 'only'), (['--live'], 'exclude'), ([], 'all')):
+            self.requests.clear()
+            self.call_argv(['ticket', 'search', 'x'] + flags, self.found)
+            self.assertEqual(self.requests[0].url.params['archived'], expected, flags)
+
+    def test_archived_and_live_together_are_refused(self):
+        with self.assertRaises(Failure) as caught:
+            parser().parse_args(['ticket', 'search', 'x', '--archived', '--live'])
+        self.assertEqual(caught.exception.code, 2)
+
+    def test_status_assignee_and_limit_are_passed_through_and_the_limit_is_bounded(self):
+        self.call_argv(['ticket', 'search', 'x', '--status', 'done', '--assignee', 'baden', '--limit', '5'], self.found)
+        self.assertEqual(dict(self.requests[0].url.params), {'q': 'x', 'status': 'done', 'assignee': 'baden', 'archived': 'all', 'limit': '5'})
+        for bad in ('0', '101'):
+            with self.assertRaises(Failure) as caught:
+                self.call_argv(['ticket', 'search', 'x', '--limit', bad], self.found)
+            self.assertEqual(caught.exception.code, 2)
+
+    def test_an_empty_search_is_a_usage_error_and_sends_nothing(self):
+        with self.assertRaises(Failure) as caught:
+            self.call_argv(['ticket', 'search', ' '], self.found)
+        self.assertEqual(caught.exception.code, 2)
+        self.assertEqual(self.requests, [])
+
+    def test_list_shows_only_the_board_unless_asked_for_the_archive(self):
+        for flags, expected in (([], None), (['--archived'], 'only'), (['--all'], 'all')):
+            self.requests.clear()
+            self.call_argv(['ticket', 'list'] + flags, env([]))
+            self.assertEqual(self.requests[0].url.params.get('archived'), expected, flags)
+
+    def test_list_archived_and_all_are_mutually_exclusive(self):
+        with self.assertRaises(Failure):
+            parser().parse_args(['ticket', 'list', '--archived', '--all'])
+
+    def test_archive_and_unarchive_use_post_and_delete_with_dry_run(self):
+        result, _ = self.call_argv(['ticket', 'archive', 'sd-12', '--dry-run'], env({'id': 'SD-12'}))
+        request = self.requests[0]
+        self.assertEqual((request.method, request.url.path, request.url.params['dry_run']), ('POST', '/api/tickets/SD-12/archive', '1'))
+        self.assertEqual(result['meta']['action'], 'archive')
+        self.requests.clear()
+        self.call_argv(['ticket', 'unarchive', 'SD-12'], env({'id': 'SD-12'}))
+        self.assertEqual((self.requests[0].method, self.requests[0].url.path), ('DELETE', '/api/tickets/SD-12/archive'))
+        self.assertNotIn('dry_run', self.requests[0].url.params)
+
+    def test_archive_needs_a_valid_reference(self):
+        with self.assertRaises(Failure) as caught:
+            self.call_argv(['ticket', 'archive', '../x'], env({}))
+        self.assertEqual(caught.exception.code, 2)
+
+
+class SearchRenderTests(unittest.TestCase):
+    def render(self, result):
+        import contextlib, io
+        from sled_dog.cli import render
+        buffer = io.StringIO()
+        with contextlib.redirect_stdout(buffer):
+            render(result, 'never')
+        return buffer.getvalue()
+
+    def search(self, rows, **meta):
+        return self.render({'schema_version': 1, 'data': rows, 'errors': [], 'meta': dict({'kind': 'search', 'q': 'login'}, **meta)})
+
+    def test_results_say_why_they_matched_and_mark_archived_tickets(self):
+        out = self.search([
+            {'id': 'SD-1', 'status': 'in_progress', 'title': 'Fix login', 'archivedAt': None, 'matchedIn': ['title', 'description'], 'snippet': '…cookies block the login…'},
+            {'id': 'SD-2', 'status': 'done', 'title': 'Email', 'archivedAt': '2026-11-01T00:00:00Z', 'matchedIn': ['subtask SD-2.1'], 'snippet': None}])
+        for expected in ('SD-1', 'in progress', 'Fix login', 'matched: title, description', '"…cookies block the login…"', 'SD-2', 'done · archived', 'matched: subtask SD-2.1'):
+            self.assertIn(expected, out)
+
+    def test_no_results_explains_what_search_looks_at(self):
+        out = self.search([], q='zebra')
+        self.assertIn('No tickets match "zebra".', out)
+        self.assertIn('subtasks, trail steps and pull request titles', ' '.join(out.split()))  # rich wraps long lines
+
+    def test_a_cut_off_result_list_says_so(self):
+        out = self.search([{'id': 'SD-1', 'status': 'todo', 'title': 't', 'matchedIn': ['title']}], truncated=True)
+        self.assertIn('More results available', out)
+
+    def test_titles_and_snippets_are_untrusted_text(self):
+        out = self.search([{'id': 'SD-1', 'status': 'todo', 'title': '\x1b[31mred\x1b[0m', 'matchedIn': ['title'], 'snippet': '\x1b]0;hijack\x07text'}])
+        self.assertNotIn('\x1b', out)
+        self.assertNotIn('\x07', out)
+
+    def test_the_ticket_table_marks_an_archived_ticket(self):
+        ticket = {'id': 'SD-5', 'status': 'done', 'priority': 'none', 'assignee': None, 'title': 'Old work', 'archivedAt': '2026-11-01T00:00:00Z', 'pullRequests': []}
+        out = self.render({'schema_version': 1, 'data': ticket, 'meta': {'kind': 'tickets'}, 'errors': []})
+        self.assertIn('done · archived', out)
+
+    def test_archive_messages_distinguish_doing_from_previewing(self):
+        ticket = {'id': 'SD-5', 'status': 'done', 'priority': 'none', 'assignee': None, 'title': 't', 'pullRequests': []}
+        def show(action, dry):
+            return self.render({'schema_version': 1, 'data': ticket, 'errors': [], 'meta': {'kind': 'tickets', 'action': action, 'dry_run': dry}})
+        self.assertIn('Archived SD-5. It leaves the board but stays searchable.', show('archive', False))
+        self.assertIn('Would archive SD-5.', show('archive', True))
+        self.assertIn('Dry run: nothing was written.', show('archive', True))
+        self.assertIn('Brought SD-5 back to the board.', show('unarchive', False))
+        self.assertIn('Would bring SD-5 back', show('unarchive', True))
