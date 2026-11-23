@@ -18,6 +18,7 @@ Local secrets go in the repo-root `.env` (gitignored). In production, set real e
 | `SLED_DOG_GITHUB_TOKEN` | Token the server uses to read pull requests (read-only repo access). Enables sync. |
 | `SLED_DOG_GITHUB_API_BASE` | GitHub Enterprise API base, e.g. `https://git.corp.com/api/v3`. Default `https://api.github.com`. |
 | `SLED_DOG_SYNC_INTERVAL_SECONDS` | Background sync period (default 300, `0` disables). |
+| `SLED_DOG_ARCHIVE_INTERVAL_SECONDS` | How often finished tickets are archived (default 3600, `0` disables). |
 | `SLED_DOG_DB_URL` | libSQL/SQLite URL (default `file:.data/sled-dog.db`). |
 
 ## GitHub sync
@@ -35,6 +36,17 @@ Tickets only move forward, nothing reaches `done` on its own, and `done`/`cancel
 - The **branch name** and the **title** always link: any `SD-<n>` or `SD-<n>.<m>` there is a deliberate signal.
 - The **description** links only when a reference **follows a keyword**: `closes`, `fixes`, `resolves`, `part of`, `refs` (one keyword covers a list: `Fixes SD-1, SD-2 and SD-3.1`).
 - A plain mention in the description does **not** link ("see SD-3", "follow-up in SD-4.2", "depends on SD-1"). Descriptions are prose, and a stray mention used to attach a PR to the wrong ticket and move it.
+
+## Archiving finished tickets
+
+Done and Canceled tickets pile up. After a ticket has sat closed for a while it is **archived**: it leaves the board but is never deleted, and it keeps its subtasks, trail and pull requests.
+
+- **How long is up to the workspace.** The default is 30 days, but teams usually want a few days, so an owner can change it. The rule is a number and a unit: **days** or **business days** (Monday to Friday; weekends don't count), and `0` means never archive automatically. For example `3 business days`, `5 business days`, `2 weeks`, `30 days`.
+- **Closing time.** A ticket's clock starts when it enters Done or Canceled and is cleared if it is reopened (`closedAt` in the API). Moving between Done and Canceled keeps the original time. Existing finished tickets were given their last-updated time when this shipped.
+- **Automatic.** A job runs shortly after startup and then every hour. It is idempotent, audited as the `archiver` system actor, and only archives a ticket once. Times are UTC.
+- **By hand.** Owners and engineers can archive a Done or Canceled ticket, and bring any archived ticket back. **Unarchiving restarts the clock**, so it is not archived again at once. Reopening an archived ticket (moving it out of Done or Canceled) returns it to the board.
+- **API.** `GET /api/tickets` hides archived tickets by default; `?archived=only` or `?archived=all` includes them. `POST` and `DELETE` on `/api/tickets/SD-12/archive` archive and unarchive (both accept `?dry_run=1`). `GET`/`PUT /api/settings/archive` read and change the rule; changing it is owners only, browser sessions only, and `?dry_run=1` reports how many tickets the new rule would archive.
+- **The board says when it is cut off.** It loads at most 200 tickets; if there are more it shows how many it is hiding (`meta.truncated` and `meta.total` in the list response) rather than silently dropping the oldest.
 
 ## Subtasks: several PRs on one ticket
 
@@ -62,7 +74,7 @@ Schema is in `server/db/schema.ts`; migrations are generated with `npx drizzle-k
 
 ```sh
 npx drizzle-kit generate --name what_changed
-npm run db:seal        # records its checksum in drizzle/meta/checksums.json
+npm run db:seal        # records its checksum in drizzle/checksums.json
 ```
 
 `tests/migrations.test.ts` (run in CI) fails if a sealed migration changes, if a migration is unsealed, or if the journal and SQL files disagree. If you are still iterating on a migration that has never been merged, `npm run db:seal -- --force` re-seals it; the change to `checksums.json` is then visible in review. If startup fails with `already exists` on your own database, you most likely edited an applied migration: restore the original file from git and add a new one.

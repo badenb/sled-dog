@@ -1,4 +1,5 @@
 import { ticketCreate } from '#shared/contract'
+import { closedAtFor } from '../../../shared/archive'
 import { useDb, schema } from '../../db'
 import { audit, requirePermission } from '../../utils/auth'
 import { envelope } from '../../utils/envelope'
@@ -15,11 +16,12 @@ export default defineEventHandler(async (event) => {
   const now = new Date().toISOString()
   if (dryRun) {
     // Show exactly what would be written, change nothing.
-    return envelope({ ...input, assignee: input.assignee ?? null, createdBy: actor.name, createdAt: now, updatedAt: now }, { dry_run: true })
+    return envelope({ ...input, assignee: input.assignee ?? null, createdBy: actor.name, createdAt: now, updatedAt: now, closedAt: closedAtFor(null, input.status, null, now), archivedAt: null }, { dry_run: true })
   }
   const db = await useDb()
   const [row] = await db.insert(schema.tickets).values({
     ...input, assignee: input.assignee ?? null, createdBy: actor.name, createdAt: now, updatedAt: now,
+    closedAt: closedAtFor(null, input.status, null, now),
   }).returning()
   const ticket = toTicket(row!)
   await audit(actor, 'ticket.create', ticket.id, input)

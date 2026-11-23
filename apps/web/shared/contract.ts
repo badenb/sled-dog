@@ -27,8 +27,11 @@ export const ticketUpdate = z.object({
   assignee: z.string().trim().max(100).nullable(),
 }).partial().refine(v => Object.keys(v).length > 0, 'Nothing to update')
 
+export const ARCHIVED_MODES = ['exclude', 'only', 'all'] as const
 export const ticketListQuery = z.object({
   status: ticketStatus.optional(),
+  // The board asks for the default (live tickets only); search and the archive ask for 'only' or 'all'.
+  archived: z.enum(ARCHIVED_MODES).default('exclude'),
   assignee: z.string().optional(),
   limit: z.coerce.number().int().min(1).max(200).default(50),
 })
@@ -44,6 +47,10 @@ export interface Ticket {
   createdBy: string
   createdAt: string
   updatedAt: string
+  /** When it entered done/canceled; null while open. */
+  closedAt?: string | null
+  /** Set once it has been archived off the board; the ticket itself is kept. */
+  archivedAt?: string | null
   pullRequests?: PullRequestSummary[]
   steps?: StepLite[]
   subtasks?: SubtaskLite[]
@@ -143,3 +150,8 @@ export const subtaskUpdate = z.object({
   status: ticketStatus,
   assignee: z.string().trim().max(100).nullable(),
 }).partial().refine(v => Object.keys(v).length > 0, 'Nothing to update')
+
+export const archiveSettingInput = z.object({
+  value: z.number().int().min(0).max(365),
+  unit: z.enum(['days', 'business_days']),
+})

@@ -32,6 +32,10 @@ const tickets = ref<Ticket[]>([])
 watch(data, v => { tickets.value = v?.data ?? [] }, { immediate: true })
 const byStatus = (status: string) => tickets.value.filter(t => t.status === status).sort(byRecent)
 
+// The board asks for at most 200 tickets. If there are more, say so instead of letting a full page look like everything.
+const truncated = computed(() => !!data.value?.meta?.truncated)
+const totalTickets = computed(() => Number(data.value?.meta?.total ?? tickets.value.length))
+
 const canMove = computed(() => !!me.value?.can['ticket:update'])
 const dragging = ref<string | null>(null)
 const over = ref<string | null>(null)
@@ -113,6 +117,7 @@ const label = (s: string) => s.replace('_', ' ')
   </form>
   <p v-if="createError" class="error">{{ createError }}</p>
   <p v-if="error" class="notice">Could not load tickets.</p>
+  <p v-if="truncated" class="notice" role="status">Showing the {{ tickets.length }} most recently updated of {{ totalTickets }} tickets. Older ones are hidden. Archive finished work to make room.</p>
 
   <div class="board">
     <section v-for="status in WORKING" :key="status" :class="['col', { over: over === status && canMove }]" v-bind="dropProps(status)">
