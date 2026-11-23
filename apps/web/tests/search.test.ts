@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { escapeLike, likePattern, matchedIn, refOf, snippet, tokenize } from '../shared/search'
+import { escapeLike, highlightSegments, likePattern, matchedIn, refOf, snippet, tokenize } from '../shared/search'
 
 describe('tokenize', () => {
   it('splits words and keeps quoted phrases together', () => {
@@ -99,5 +99,40 @@ describe('matchedIn', () => {
   })
   it('says nothing for no match', () => {
     expect(matchedIn(ticket, ['zebra'])).toEqual([])
+  })
+})
+
+
+describe('highlightSegments', () => {
+  const joined = (segments: { text: string }[]) => segments.map(s => s.text).join('')
+  it('marks every occurrence of a term, ignoring case, and loses no text', () => {
+    const segments = highlightSegments('Fix Login redirect; login again', ['login'])
+    expect(segments.filter(s => s.hit).map(s => s.text)).toEqual(['Login', 'login'])
+    expect(joined(segments)).toBe('Fix Login redirect; login again')
+  })
+  it('handles several terms, preferring the longer match where they overlap', () => {
+    const segments = highlightSegments('login redirect', ['log', 'login', 'redirect'])
+    expect(segments.filter(s => s.hit).map(s => s.text)).toEqual(['login', 'redirect'])
+  })
+  it('treats regex characters in a term as plain text', () => {
+    expect(highlightSegments('price is (100%) [ok] a.b', ['(100%)', '[ok]', 'a.b']).filter(s => s.hit).map(s => s.text)).toEqual(['(100%)', '[ok]', 'a.b'])
+    expect(highlightSegments('abc', ['.']).some(s => s.hit)).toBe(false) // "." is a dot, not "any character"
+    expect(highlightSegments('a+b', ['+']).filter(s => s.hit).map(s => s.text)).toEqual(['+'])
+  })
+  it('is plain text out: markup in a title stays text', () => {
+    const segments = highlightSegments('<img src=x onerror=alert(1)> login', ['login'])
+    expect(joined(segments)).toBe('<img src=x onerror=alert(1)> login')
+    expect(segments.find(s => s.hit)!.text).toBe('login')
+  })
+  it('returns the text untouched for no terms, no match, or empty text', () => {
+    expect(highlightSegments('hello', [])).toEqual([{ text: 'hello', hit: false }])
+    expect(highlightSegments('hello', ['zzz'])).toEqual([{ text: 'hello', hit: false }])
+    expect(highlightSegments('', ['a'])).toEqual([{ text: '', hit: false }])
+    expect(highlightSegments('hello', ['', '  '])).toEqual([{ text: 'hello', hit: false }])
+  })
+  it('keeps positions right for text whose lowercase form has a different length', () => {
+    const text = 'İstanbul login'
+    expect(highlightSegments(text, ['login']).map(s => s.text).join('')).toBe(text)
+    expect(highlightSegments(text, ['login']).find(s => s.hit)!.text).toBe('login')
   })
 })

@@ -1,27 +1,10 @@
 <script setup lang="ts">
 import { TICKET_STATUSES, type Envelope, type Ticket } from '#shared/contract'
 import { byRecent, moveTicket, revertMove } from '#shared/board'
-import type { OriginRect } from '~/components/TicketModal.vue'
 
 const WORKING = TICKET_STATUSES.filter(s => s !== 'canceled')
 
-// The open ticket lives in the URL (?ticket=SD-12): shareable, and Back closes it.
-const route = useRoute()
-const router = useRouter()
-const openId = computed(() => (typeof route.query.ticket === 'string' ? route.query.ticket : null))
-const origin = ref<OriginRect | null>(null)
-function openTicket(id: string, rect: DOMRect) {
-  origin.value = { left: rect.left, top: rect.top, width: rect.width, height: rect.height }
-  router.push({ query: { ...route.query, ticket: id } })
-}
-function closeTicket() {
-  origin.value = null
-  const { ticket: _closed, ...rest } = route.query
-  router.replace({ query: rest })
-}
-let refreshTimer: ReturnType<typeof setTimeout> | undefined
-// Edits in the modal arrive in bursts; refresh the board once they settle.
-const onChanged = () => { clearTimeout(refreshTimer); refreshTimer = setTimeout(() => refreshNuxtData('tickets'), 500) }
+const sheet = useTicketSheet()
 
 const { data: me } = await useMe()
 const toast = useToast()
@@ -35,6 +18,11 @@ const byStatus = (status: string) => tickets.value.filter(t => t.status === stat
 // The board asks for at most 200 tickets. If there are more, say so instead of letting a full page look like everything.
 const truncated = computed(() => !!data.value?.meta?.truncated)
 const totalTickets = computed(() => Number(data.value?.meta?.total ?? tickets.value.length))
+
+// Finished tickets leave the board after a while: say when, and where they went.
+const { data: archivedData } = await useFetch<Envelope<Ticket[]>>('/api/tickets', { key: 'archived-count', query: { archived: 'only', limit: 1 } })
+const archivedCount = computed(() => Number(archivedData.value?.meta?.total ?? 0))
+const { data: archiveRule } = await useFetch<Envelope<{ summary: string }>>('/api/settings/archive', { key: 'archive-setting' })
 
 const canMove = computed(() => !!me.value?.can['ticket:update'])
 const dragging = ref<string | null>(null)
@@ -106,6 +94,9 @@ const label = (s: string) => s.replace('_', ' ')
       <h1>Tickets</h1>
       <p class="muted small">{{ tickets.length }} total · {{ byStatus('in_review').length }} in review · {{ byStatus('in_progress').length }} in progress</p>
     </div>
+    <NuxtLink class="archive-link" :to="{ path: '/search', query: { archived: 'only' } }" :title="`Finished tickets leave the board after ${archiveRule?.data.summary ?? 'a while'}`">
+      <span aria-hidden="true">📦</span> Archive <span class="count-pill">{{ archivedCount }}</span>
+    </NuxtLink>
   </div>
 
   <form v-if="me?.can['ticket:create']" class="quick-add" @submit.prevent="create">
@@ -125,10 +116,14 @@ const label = (s: string) => s.replace('_', ' ')
       <div class="cards">
         <TicketCard
           v-for="t in byStatus(status)" :key="t.id" :ticket="t" :movable="canMove" :dragging="dragging === t.id" :moving="moving.has(t.id)"
-          @dragstart="onDragStart($event, t.id)" @dragend="dragging = over = null" @move="move(t.id, $event)" @open="openTicket(t.id, $event)"
+          @dragstart="onDragStart($event, t.id)" @dragend="dragging = over = null" @move="move(t.id, $event)" @open="sheet.open(t.id, $event)"
         />
         <div v-if="!byStatus(status).length" class="empty">{{ canMove ? 'Drop a ticket here' : 'Nothing here' }}</div>
       </div>
+      <p v-if="status === 'done'" class="col-note muted small">
+        Archived after {{ archiveRule?.data.summary ?? '…' }}.
+        <NuxtLink v-if="me?.can['team:manage']" to="/settings/archive">Change</NuxtLink>
+      </p>
     </section>
   </div>
 
@@ -142,12 +137,9 @@ const label = (s: string) => s.replace('_', ' ')
     <div v-if="showCanceled" class="cards">
       <TicketCard
         v-for="t in byStatus('canceled')" :key="t.id" :ticket="t" :movable="canMove" :dragging="dragging === t.id" :moving="moving.has(t.id)"
-        @dragstart="onDragStart($event, t.id)" @dragend="dragging = over = null" @move="move(t.id, $event)" @open="openTicket(t.id, $event)"
+        @dragstart="onDragStart($event, t.id)" @dragend="dragging = over = null" @move="move(t.id, $event)" @open="sheet.open(t.id, $event)"
       />
       <div v-if="!byStatus('canceled').length" class="empty">No canceled tickets</div>
     </div>
   </div>
-  <ClientOnly>
-    <TicketModal v-if="openId" :id="openId" :key="openId" :from="origin" @close="closeTicket" @changed="onChanged" />
-  </ClientOnly>
 </template>
