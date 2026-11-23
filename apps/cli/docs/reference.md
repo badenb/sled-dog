@@ -174,7 +174,7 @@ Every operation emits one document in JSON mode:
 }
 ```
 
-This is an illustrative empty list response. Errors also use this envelope, with `data: null` where no result exists. Metadata can include warnings; missing optional fields are null. JSON contains no progress or ANSI escapes. Help remains ordinary command help.
+This is an illustrative empty list response. Errors also use this envelope, with `data: null` where no result exists. Metadata can include warnings; missing optional fields are null. An error entry has a `message` and a `code`, and an *unexpected* error (one that is not a normal failure like a bad token) also has a `type`, the name of the exception, so a script can tell them apart without parsing prose. JSON contains no progress or ANSI escapes. Help remains ordinary command help.
 
 | Exit | Meaning |
 | --- | --- |
@@ -184,6 +184,8 @@ This is an illustrative empty list response. Errors also use this envelope, with
 | 3 | Missing/rejected authentication or account mismatch |
 | 4 | Partial/incomplete retrieval or stale checks |
 | 130 | Interrupted |
+
+**Unexpected errors.** A failure caused by the machine or network (a file, a socket, a bad value) prints `Cannot complete request. Check configuration and host response.`; a bug in sled-dog itself prints `Internal error (TypeName): this is a bug in sled-dog, not your setup.` Both exit 1 and, by default, hide the exception's own text, which can contain paths or URLs. Set `SLED_DOG_DEBUG=1` (or `true`/`yes`) to print the full traceback to **stderr**; stdout stays a single JSON document in `--json` mode. Review a traceback before sharing it.
 
 Reaching your requested list limit is successful, with `truncated: true`. GitHub search timeouts are partial. The search provider ceiling is reported separately; narrow large searches. Results are limited to repositories and teams visible to the token. A successfully completed request does not prove access to every repository in an organization.
 
