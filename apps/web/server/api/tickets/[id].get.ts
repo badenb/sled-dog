@@ -4,6 +4,7 @@ import { requirePermission } from '../../utils/auth'
 import { envelope } from '../../utils/envelope'
 import { parseTicketRef, toTicket, withPullRequests } from '../../utils/tickets'
 import { withSteps } from '../../utils/steps'
+import { withSubtasks } from '../../utils/subtasks'
 
 export default defineEventHandler(async (event) => {
   const actor = await requirePermission(event, 'ticket', 'read')
@@ -11,5 +12,5 @@ export default defineEventHandler(async (event) => {
   const db = await useDb()
   const row = await db.select().from(schema.tickets).where(eq(schema.tickets.number, number)).get()
   if (!row) throw createError({ statusCode: 404, statusMessage: 'Ticket not found' })
-  return envelope((await withSteps(await withPullRequests([toTicket(row)]), actor, true))[0])
+  return envelope((await withSubtasks(await withSteps(await withPullRequests([toTicket(row)]), actor, true), true))[0])
 })

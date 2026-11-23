@@ -1,16 +1,12 @@
 // Pull GitHub PRs into the workspace, link them to tickets, and advance ticket status.
 // Takes the db and fetch as parameters so it can be tested against an in-memory database.
-import { and, eq, inArray } from 'drizzle-orm'
-import type { LibSQLDatabase } from 'drizzle-orm/libsql'
-import { extractTicketNumbers, nextStatus } from '../../shared/linking'
-import type { Ticket } from '../../shared/contract'
-import type * as schemaModule from '../db/schema'
-import { githubSources, pullRequests, ticketLinks, tickets, auditLog } from '../db/schema'
+import { and, eq } from 'drizzle-orm'
+import { extractRefs } from '../../shared/linking'
+import { githubSources, pullRequests, subtaskLinks, subtasks, ticketLinks, tickets } from '../db/schema'
 import { fetchPullRequests, GitHubError, type Fetch, type GitHubConfig } from './github'
+import { refreshSubtaskStatus, refreshTicketStatus, type Db, type Transition } from './status'
 
-type Db = LibSQLDatabase<typeof schemaModule>
-
-export interface SourceResult { source: string, prsSeen: number, linked: number, transitions: { ticket: string, from: string, to: string }[], truncated: boolean, error: string | null }
+export interface SourceResult { source: string, prsSeen: number, linked: number, transitions: Transition[], truncated: boolean, error: string | null }
 
 const INITIAL_WINDOW_DAYS = 30
 const OVERLAP_MS = 5 * 60_000 // re-read a little history so a slow webhook/clock skew can't drop updates
@@ -32,7 +28,10 @@ export async function syncSource(
   try {
     const { rows, truncated } = await fetchPullRequests(config, source.kind as 'org' | 'repo', source.name, since, { fetchImpl })
     const existing = new Set((await db.select({ n: tickets.number }).from(tickets)).map(t => t.n))
-    const affected = new Set<number>()
+    // "12.2" -> subtask id, so a reference like SD-12.2 resolves without a query per PR.
+    const subtaskIds = new Map((await db.select().from(subtasks)).map(s => [`${s.ticketNumber}.${s.number}`, s.id]))
+    const affectedTickets = new Set<number>()
+    const affectedSubtasks = new Set<number>()
     let linked = 0
 
     for (const pr of rows) {
@@ -41,32 +40,45 @@ export async function syncSource(
         .onConflictDoUpdate({ target: pullRequests.key, set: { ...columns, syncedAt: startedAt } })
 
       // Links are re-derived from the PR text each sync, so editing a title can both add and remove a link.
-      const wanted = extractTicketNumbers(pr.title, pr.headBranch, body).filter(n => existing.has(n))
-      const current = (await db.select().from(ticketLinks).where(eq(ticketLinks.prKey, pr.key))).map(l => l.ticketNumber)
-      for (const n of wanted) {
-        if (!current.includes(n)) { await db.insert(ticketLinks).values({ ticketNumber: n, prKey: pr.key }); linked++ }
-        affected.add(n)
+      // SD-12 links the ticket; SD-12.2 links only that subtask. A subtask that does not exist is ignored
+      // (never silently attached to the parent, which could move the ticket early).
+      const refs = extractRefs(pr.title, pr.headBranch, body)
+      const wantedTickets = refs.filter(r => r.subtask === null && existing.has(r.ticket)).map(r => r.ticket)
+      const wantedSubtasks = refs.flatMap(r => (r.subtask !== null && subtaskIds.has(`${r.ticket}.${r.subtask}`) ? [subtaskIds.get(`${r.ticket}.${r.subtask}`)!] : []))
+
+      const currentTickets = (await db.select().from(ticketLinks).where(eq(ticketLinks.prKey, pr.key))).map(l => l.ticketNumber)
+      for (const n of wantedTickets) {
+        if (!currentTickets.includes(n)) { await db.insert(ticketLinks).values({ ticketNumber: n, prKey: pr.key }); linked++ }
+        affectedTickets.add(n)
       }
-      for (const n of current.filter(n => !wanted.includes(n))) {
+      for (const n of currentTickets.filter(n => !wantedTickets.includes(n))) {
         await db.delete(ticketLinks).where(and(eq(ticketLinks.prKey, pr.key), eq(ticketLinks.ticketNumber, n)))
-        affected.add(n)
+        affectedTickets.add(n)
+      }
+
+      const currentSubtasks = (await db.select().from(subtaskLinks).where(eq(subtaskLinks.prKey, pr.key))).map(l => l.subtaskId)
+      for (const id of wantedSubtasks) {
+        if (!currentSubtasks.includes(id)) { await db.insert(subtaskLinks).values({ subtaskId: id, prKey: pr.key }); linked++ }
+        affectedSubtasks.add(id)
+      }
+      for (const id of currentSubtasks.filter(id => !wantedSubtasks.includes(id))) {
+        await db.delete(subtaskLinks).where(and(eq(subtaskLinks.prKey, pr.key), eq(subtaskLinks.subtaskId, id)))
+        affectedSubtasks.add(id)
       }
     }
 
-    const transitions: SourceResult['transitions'] = []
-    for (const number of affected) {
-      const ticket = await db.select().from(tickets).where(eq(tickets.number, number)).get()
-      if (!ticket) continue
-      const keys = (await db.select().from(ticketLinks).where(eq(ticketLinks.ticketNumber, number))).map(l => l.prKey)
-      const prs = keys.length ? await db.select().from(pullRequests).where(inArray(pullRequests.key, keys)) : []
-      const target = nextStatus(ticket.status as Ticket['status'], prs.map(p => ({ state: p.state as 'open' | 'closed' | 'merged', draft: p.draft })))
-      if (target === ticket.status) continue
-      await db.update(tickets).set({ status: target, updatedAt: startedAt }).where(eq(tickets.number, number))
-      await db.insert(auditLog).values({
-        at: startedAt, actor: 'github-sync', actorKind: 'system', tokenName: null, action: 'ticket.auto_status',
-        target: `SD-${number}`, detail: JSON.stringify({ from: ticket.status, to: target, pullRequests: keys }),
-      })
-      transitions.push({ ticket: `SD-${number}`, from: ticket.status, to: target })
+    // Subtasks first, then the tickets they belong to, so a ticket sees its subtasks' new status.
+    const who = { name: 'github-sync', kind: 'system' }
+    const transitions: Transition[] = []
+    for (const id of affectedSubtasks) {
+      const parent = (await db.select().from(subtasks).where(eq(subtasks.id, id)).get())?.ticketNumber
+      if (parent !== undefined) affectedTickets.add(parent)
+      const moved = await refreshSubtaskStatus(db, id, startedAt, who)
+      if (moved) transitions.push(moved)
+    }
+    for (const number of affectedTickets) {
+      const moved = await refreshTicketStatus(db, number, startedAt, who)
+      if (moved) transitions.push(moved)
     }
 
     // Only advance the cursor after a fully successful pass; a truncated read keeps the old cursor so nothing is skipped.

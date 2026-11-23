@@ -11,6 +11,8 @@ export const tickets = sqliteTable('tickets', {
   createdBy: text('created_by').notNull(),
   createdAt: text('created_at').notNull(),
   updatedAt: text('updated_at').notNull(),
+  // Highest subtask number ever issued for this ticket. Only goes up, so SD-12.4 can never be reused after a delete.
+  subtaskSeq: integer('subtask_seq').notNull().default(0),
 }, t => [index('tickets_status_idx').on(t.status)])
 
 // Tokens are stored hashed. `kind` separates humans from agents so every
@@ -111,3 +113,21 @@ export const ticketSteps = sqliteTable('ticket_steps', {
   createdAt: text('created_at').notNull(),
   updatedAt: text('updated_at').notNull(),
 }, t => [index('ticket_steps_ticket_idx').on(t.ticketNumber, t.position)])
+
+// ── Subtasks: engineering work chunks inside a ticket, each with its own status and PRs (SD-12.2) ──
+export const subtasks = sqliteTable('subtasks', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  ticketNumber: integer('ticket_number').notNull(),
+  number: integer('number').notNull(), // per-ticket sequence: the "2" in SD-12.2
+  title: text('title').notNull(),
+  status: text('status').notNull().default('todo'),
+  assignee: text('assignee'),
+  createdBy: text('created_by').notNull(),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+}, t => [uniqueIndex('subtasks_ticket_number_uidx').on(t.ticketNumber, t.number)])
+
+export const subtaskLinks = sqliteTable('subtask_links', {
+  subtaskId: integer('subtask_id').notNull(),
+  prKey: text('pr_key').notNull(),
+}, t => [primaryKey({ columns: [t.subtaskId, t.prKey] }), index('subtask_links_pr_idx').on(t.prKey)])

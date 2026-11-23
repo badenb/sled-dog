@@ -32,7 +32,7 @@ beforeEach(async () => {
 })
 
 describe('syncSource', () => {
-  it('links a PR by branch name and moves the ticket through its lifecycle', async () => {
+  it('links a PR by branch name and moves the ticket through its lifecycle, landing merged work in test', async () => {
     const source = await seed()
     const first = await syncSource(db, config, source, { fetchImpl: reply([node()]) })
     expect(first).toMatchObject({ prsSeen: 1, linked: 1, error: null })
@@ -41,7 +41,7 @@ describe('syncSource', () => {
     const [fresh] = await db.select().from(schema.githubSources)
     await syncSource(db, config, fresh!, { fetchImpl: reply([node({ state: 'MERGED', merged: true, mergedAt: '2026-11-22T10:00:00Z' })]) })
     const ticket = await db.select().from(schema.tickets).where(eq(schema.tickets.number, 1)).get()
-    expect(ticket?.status).toBe('done')
+    expect(ticket?.status).toBe('test') // merged code is verified by a person before it is done
     const audit = await db.select().from(schema.auditLog)
     expect(audit.map(a => a.action)).toEqual(['ticket.auto_status', 'ticket.auto_status'])
     expect(audit[0]).toMatchObject({ actor: 'github-sync', actorKind: 'system', target: 'SD-1' })
@@ -116,5 +116,84 @@ describe('query building', () => {
   it('derives GraphQL URLs for github.com and Enterprise', () => {
     expect(graphqlUrl('https://api.github.com')).toBe('https://api.github.com/graphql')
     expect(graphqlUrl('https://git.corp.com/api/v3/')).toBe('https://git.corp.com/api/graphql')
+  })
+})
+
+
+describe('subtasks: several PRs on one ticket', () => {
+  const sub = (n: number) => ({ ticketNumber: 1, number: n, title: `part ${n}`, status: 'todo', createdBy: 'x', createdAt: '2026-11-01T00:00:00Z', updatedAt: '2026-11-01T00:00:00Z' })
+  async function seedWithSubtasks(count = 2) {
+    const source = await seed()
+    for (let n = 1; n <= count; n++) await db.insert(schema.subtasks).values(sub(n))
+    return source
+  }
+  const status = async () => (await db.select().from(schema.tickets).get())!.status
+  const subStatuses = async () => (await db.select().from(schema.subtasks).orderBy(schema.subtasks.number)).map(s => s.status)
+  const pr = (n: number, branch: string, over: Record<string, unknown> = {}) => node({ number: n, title: `PR ${n}`, headRefName: branch, url: `https://github.com/acme/web/pull/${n}`, ...over })
+  const next = async (nodes: unknown[]) => { const [src] = await db.select().from(schema.githubSources); return syncSource(db, config, src!, { fetchImpl: reply(nodes) }) }
+
+  it('one PR in review does not move the whole ticket to review', async () => {
+    const source = await seedWithSubtasks()
+    await syncSource(db, config, source, { fetchImpl: reply([pr(10, 'feature/SD-1.1-api')]) })
+    expect(await subStatuses()).toEqual(['in_review', 'todo'])
+    expect(await status()).toBe('in_progress') // started, but nowhere near review
+  })
+
+  it('the ticket reaches review only when every subtask has, then follows them to test', async () => {
+    const source = await seedWithSubtasks()
+    await syncSource(db, config, source, { fetchImpl: reply([pr(10, 'SD-1.1-api')]) })
+    await next([pr(10, 'SD-1.1-api'), pr(11, 'SD-1.2-ui')])
+    expect(await subStatuses()).toEqual(['in_review', 'in_review'])
+    expect(await status()).toBe('in_review')
+    const merged = (n: number, b: string) => pr(n, b, { state: 'MERGED', merged: true, mergedAt: '2026-11-22T10:00:00Z' })
+    await next([merged(10, 'SD-1.1-api'), pr(11, 'SD-1.2-ui')])
+    expect(await status()).toBe('in_review') // one merged, one still in review: the slowest decides
+    await next([merged(10, 'SD-1.1-api'), merged(11, 'SD-1.2-ui')])
+    expect(await subStatuses()).toEqual(['test', 'test'])
+    expect(await status()).toBe('test')
+  })
+
+  it('reports subtask and ticket moves separately and audits them as github-sync', async () => {
+    const source = await seedWithSubtasks(1)
+    const result = await syncSource(db, config, source, { fetchImpl: reply([pr(10, 'SD-1.1-api')]) })
+    expect(result.transitions).toEqual([{ ticket: 'SD-1.1', from: 'todo', to: 'in_review' }, { ticket: 'SD-1', from: 'todo', to: 'in_review' }])
+    const audit = await db.select().from(schema.auditLog)
+    expect(audit.map(a => `${a.actor}:${a.action}:${a.target}`)).toEqual(['github-sync:subtask.auto_status:SD-1.1', 'github-sync:ticket.auto_status:SD-1'])
+  })
+
+  it('ignores a reference to a subtask that does not exist instead of attaching it to the parent', async () => {
+    const source = await seedWithSubtasks()
+    const result = await syncSource(db, config, source, { fetchImpl: reply([pr(10, 'SD-1.9-ghost', { title: 'Ghost work' })]) })
+    expect(result.linked).toBe(0)
+    expect(await status()).toBe('todo')
+    expect(await db.select().from(schema.ticketLinks)).toHaveLength(0)
+  })
+
+  it('a PR that names only the parent is shown on it but cannot drive a ticket that has subtasks', async () => {
+    const source = await seedWithSubtasks()
+    await syncSource(db, config, source, { fetchImpl: reply([pr(10, 'feature/SD-1-everything')]) })
+    expect(await db.select().from(schema.ticketLinks)).toHaveLength(1)
+    expect(await status()).toBe('todo')
+  })
+
+  it('a PR can mention the parent and its subtask; the subtask still drives', async () => {
+    const source = await seedWithSubtasks(1)
+    await syncSource(db, config, source, { fetchImpl: reply([pr(10, 'SD-1.1-api', { title: 'Part of SD-1: API' })]) })
+    expect(await db.select().from(schema.ticketLinks)).toHaveLength(1)
+    expect(await db.select().from(schema.subtaskLinks)).toHaveLength(1)
+    expect(await subStatuses()).toEqual(['in_review'])
+  })
+
+  it('removes a subtask link when the reference is edited out', async () => {
+    const source = await seedWithSubtasks(1)
+    await syncSource(db, config, source, { fetchImpl: reply([pr(10, 'SD-1.1-api')]) })
+    await next([pr(10, 'feature/api')])
+    expect(await db.select().from(schema.subtaskLinks)).toHaveLength(0)
+  })
+
+  it('a ticket without subtasks behaves exactly as before', async () => {
+    const source = await seed()
+    await syncSource(db, config, source, { fetchImpl: reply([pr(10, 'SD-1-single')]) })
+    expect(await status()).toBe('in_review')
   })
 })

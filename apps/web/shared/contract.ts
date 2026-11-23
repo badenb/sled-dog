@@ -2,7 +2,7 @@
 // and the server (validation). The CLI consumes the same shapes via JSON.
 import { z } from 'zod'
 
-export const TICKET_STATUSES = ['backlog', 'todo', 'in_progress', 'in_review', 'done', 'canceled'] as const
+export const TICKET_STATUSES = ['backlog', 'todo', 'in_progress', 'in_review', 'test', 'done', 'canceled'] as const
 export const TICKET_PRIORITIES = ['none', 'low', 'medium', 'high', 'urgent'] as const
 export const SCOPES = ['tickets:read', 'tickets:write'] as const
 
@@ -46,6 +46,7 @@ export interface Ticket {
   updatedAt: string
   pullRequests?: PullRequestSummary[]
   steps?: StepLite[]
+  subtasks?: SubtaskLite[]
 }
 
 export const STEP_STATUSES = ['todo', 'done'] as const
@@ -60,7 +61,19 @@ export interface Step extends StepLite {
   completedBy: string | null
   canComplete: boolean
 }
-export interface TicketDetail extends Ticket { steps: Step[] }
+/** A chunk of engineering work inside a ticket, with its own status and pull requests. Referenced as SD-12.2. */
+export interface SubtaskLite { number: number, status: Ticket['status'] }
+export interface Subtask extends SubtaskLite {
+  id: number
+  ticketNumber: number
+  ref: string // e.g. SD-12.2, what you write in a branch name or PR title
+  title: string
+  assignee: string | null
+  pullRequests: PullRequestSummary[]
+  createdAt: string
+  updatedAt: string
+}
+export interface TicketDetail extends Ticket { steps: Step[], subtasks: Subtask[] }
 export interface Team { id: string, name: string, members: { id: string, name: string }[] }
 export interface Member { id: string, name: string, email: string, role: string }
 
@@ -119,3 +132,14 @@ export const stepUpdate = z.object({
 export const stepOrder = z.object({ order: z.array(z.number().int().positive()).min(1).max(200) })
 export const teamCreate = z.object({ name: z.string().trim().min(1).max(60) })
 export const teamMembers = z.object({ userIds: z.array(z.string().min(1)).max(500) })
+
+export const subtaskCreate = z.object({
+  title: z.string().trim().min(1).max(200),
+  assignee: z.string().trim().max(100).nullish(),
+})
+// Explicit schema, not subtaskCreate.partial(): same defaults trap as tickets.
+export const subtaskUpdate = z.object({
+  title: z.string().trim().min(1).max(200),
+  status: ticketStatus,
+  assignee: z.string().trim().max(100).nullable(),
+}).partial().refine(v => Object.keys(v).length > 0, 'Nothing to update')
