@@ -10,7 +10,8 @@
     "postinstall": "nuxt prepare",
     "test": "vitest run",
     "typecheck": "nuxt typecheck",
-    "db:push": "drizzle-kit push"
+    "db:push": "drizzle-kit push",
+    "db:seal": "node scripts/seal-migrations.mjs"
   },
   "dependencies": {
     "@libsql/client": "^0.18.0",

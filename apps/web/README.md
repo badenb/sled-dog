@@ -51,3 +51,12 @@ The board columns are fixed for everyone (backlog, todo, in progress, in review,
 ## Database
 
 Schema is in `server/db/schema.ts`; migrations are generated with `npx drizzle-kit generate` and applied automatically at startup. Run the server from `apps/web` so it finds the `drizzle/` folder.
+
+**A migration that has been committed must never change.** Each database remembers every migration by its hash, so editing or regenerating one makes the next startup try to re-run it and fail with `table ... already exists`. To change the schema, add a **new** migration:
+
+```sh
+npx drizzle-kit generate --name what_changed
+npm run db:seal        # records its checksum in drizzle/meta/checksums.json
+```
+
+`tests/migrations.test.ts` (run in CI) fails if a sealed migration changes, if a migration is unsealed, or if the journal and SQL files disagree. If you are still iterating on a migration that has never been merged, `npm run db:seal -- --force` re-seals it; the change to `checksums.json` is then visible in review. If startup fails with `already exists` on your own database, you most likely edited an applied migration: restore the original file from git and add a new one.
