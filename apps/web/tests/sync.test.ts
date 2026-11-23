@@ -197,3 +197,34 @@ describe('subtasks: several PRs on one ticket', () => {
     expect(await status()).toBe('in_review')
   })
 })
+
+
+describe('what links a PR (SD-5)', () => {
+  const sub = (n: number) => ({ ticketNumber: 1, number: n, title: `part ${n}`, status: 'todo', createdBy: 'x', createdAt: '2026-11-01T00:00:00Z', updatedAt: '2026-11-01T00:00:00Z' })
+  const setup = async () => { const source = await seed(); for (const n of [1, 2]) await db.insert(schema.subtasks).values(sub(n)); return source }
+  const prWith = (body: string, branch = 'feature/api') => node({ headRefName: branch, title: 'API work', body })
+  const linksAfter = async (n: ReturnType<typeof node>) => { await syncSource(db, config, (await setup()), { fetchImpl: reply([n]) }); return { tickets: (await db.select().from(schema.ticketLinks)).length, subtasks: (await db.select().from(schema.subtaskLinks)).length } }
+
+  it('a description that only mentions a sibling subtask neither links nor moves it', async () => {
+    const result = await linksAfter(prWith('This is the first of two PRs. The second PR is SD-1.2 and follows this one.', 'SD-1.1-api'))
+    expect(result).toEqual({ tickets: 0, subtasks: 1 }) // only SD-1.1, from the branch
+    expect((await db.select().from(schema.subtasks).orderBy(schema.subtasks.number)).map(s => s.status)).toEqual(['in_review', 'todo'])
+  })
+
+  it('a description mentioning a ticket without a keyword links nothing', async () => {
+    expect(await linksAfter(prWith('See SD-1 for background and SD-1.2 for the follow-up.'))).toEqual({ tickets: 0, subtasks: 0 })
+  })
+
+  it('a keyword in the description links', async () => {
+    expect(await linksAfter(prWith('Closes SD-1.2'))).toEqual({ tickets: 0, subtasks: 1 })
+  })
+
+  it('removes a link when the keyword is edited out of the description', async () => {
+    const source = await setup()
+    await syncSource(db, config, source, { fetchImpl: reply([prWith('Part of SD-1')]) })
+    expect(await db.select().from(schema.ticketLinks)).toHaveLength(1)
+    const [fresh] = await db.select().from(schema.githubSources)
+    await syncSource(db, config, fresh!, { fetchImpl: reply([prWith('Related to SD-1')]) })
+    expect(await db.select().from(schema.ticketLinks)).toHaveLength(0)
+  })
+})

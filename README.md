@@ -2,7 +2,7 @@
 
 A developer-first project management platform. Engineers keep working in git and the terminal; Sled Dog turns that work into progress that non-technical stakeholders can read.
 
-- **Status comes from git, not from status meetings.** A pull request that mentions a ticket (`SD-12` in the branch, title, or description) links to it, and the ticket moves on its own: draft → in progress, open → in review, merged → test (a person moves it to done).
+- **Status comes from git, not from status meetings.** A pull request that references a ticket (`SD-12` in the branch name or title, or after a keyword like `closes`, `fixes`, or `part of` in the description) links to it, and the ticket moves on its own: draft → in progress, open → in review, merged → test (a person moves it to done).
 - **Built for agents as well as people.** The CLI has stable JSON output, `--dry-run` on every write, and retry-safe creates, so a coding agent can manage tickets safely.
 - **Safe by default.** Invite-only workspaces, three roles, scoped API tokens that can never exceed their owner, and an audit log that separates human and agent actions.
 

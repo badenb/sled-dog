@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { extractRefs, nextStatus, statusFromSubtasks } from '../shared/linking'
+import { extractLinkRefs, extractRefs, nextStatus, statusFromSubtasks } from '../shared/linking'
 
 const t = (ticket: number, subtask: number | null = null) => ({ ticket, subtask })
 
@@ -23,6 +23,53 @@ describe('extractRefs', () => {
   })
   it('lists each reference once, sorted', () => {
     expect(extractRefs('SD-2.1 SD-2.1 SD-1', 'sd-2.1')).toEqual([t(1), t(2, 1)])
+  })
+})
+
+describe('extractLinkRefs: what links a PR', () => {
+  const link = (body: string, extra: { title?: string, branch?: string } = {}) => extractLinkRefs({ body, ...extra })
+
+  it('branch and title always link', () => {
+    expect(extractLinkRefs({ branch: 'feature/SD-12.2-api' })).toEqual([t(12, 2)])
+    expect(extractLinkRefs({ title: 'SD-7: Add login', branch: 'x' })).toEqual([t(7)])
+    expect(extractLinkRefs({ title: 'Part of SD-12: API', body: 'Nothing special' })).toEqual([t(12)])
+  })
+  it('a plain mention in the description does not link (the bug that moved a ticket early)', () => {
+    expect(link('The second PR is SD-4.2 and it follows this one.')).toEqual([])
+    expect(link('See SD-3 for background. Related to SD-9.1.')).toEqual([])
+    expect(link('Follow-up in SD-4.2 (step commands)')).toEqual([])
+    expect(link('Depends on SD-1 and blocks SD-2')).toEqual([])
+  })
+  it('a description links after a keyword', () => {
+    expect(link('Closes SD-12')).toEqual([t(12)])
+    expect(link('this fixes sd-12.2.')).toEqual([t(12, 2)])
+    expect(link('Resolves: SD-5')).toEqual([t(5)])
+    expect(link('Part of **SD-4**')).toEqual([t(4)])
+    expect(link('Refs `SD-7`')).toEqual([t(7)])
+    expect(link('Reference SD-8')).toEqual([t(8)])
+  })
+  it('one keyword covers a list of references', () => {
+    expect(link('Fixes SD-1, SD-2 and SD-3.1')).toEqual([t(1), t(2), t(3, 1)])
+    expect(link('Closes SD-1 & SD-2')).toEqual([t(1), t(2)])
+  })
+  it('only the references right after the keyword link, not later mentions', () => {
+    expect(link('Closes SD-1. Also see SD-2 and the notes in SD-3.1')).toEqual([t(1)])
+    expect(link('Part of SD-4\n\nThe other half is SD-4.2')).toEqual([t(4)])
+  })
+  it('a keyword that is not followed by a reference links nothing', () => {
+    expect(link('This closes the loop on SD-5')).toEqual([])
+    expect(link('It fixes things. SD-5 is related')).toEqual([])
+  })
+  it('does not match keywords inside other words', () => {
+    expect(link('prefixes SD-3')).toEqual([])
+    expect(link('unfixes SD-3 and disclose SD-4')).toEqual([])
+  })
+  it('combines branch, title and keyworded references once each, sorted', () => {
+    expect(extractLinkRefs({ branch: 'SD-2.1-x', title: 'SD-2.1 thing', body: 'Closes SD-1 and fixes SD-2.1' })).toEqual([t(1), t(2, 1)])
+  })
+  it('handles an empty or missing description', () => {
+    expect(extractLinkRefs({ title: 'x', branch: 'y', body: null })).toEqual([])
+    expect(extractLinkRefs({})).toEqual([])
   })
 })
 

@@ -1,7 +1,7 @@
 // Pull GitHub PRs into the workspace, link them to tickets, and advance ticket status.
 // Takes the db and fetch as parameters so it can be tested against an in-memory database.
 import { and, eq } from 'drizzle-orm'
-import { extractRefs } from '../../shared/linking'
+import { extractLinkRefs } from '../../shared/linking'
 import { githubSources, pullRequests, subtaskLinks, subtasks, ticketLinks, tickets } from '../db/schema'
 import { fetchPullRequests, GitHubError, type Fetch, type GitHubConfig } from './github'
 import { refreshSubtaskStatus, refreshTicketStatus, type Db, type Transition } from './status'
@@ -40,9 +40,10 @@ export async function syncSource(
         .onConflictDoUpdate({ target: pullRequests.key, set: { ...columns, syncedAt: startedAt } })
 
       // Links are re-derived from the PR text each sync, so editing a title can both add and remove a link.
+      // Branch and title always link; the description only after a keyword (see extractLinkRefs).
       // SD-12 links the ticket; SD-12.2 links only that subtask. A subtask that does not exist is ignored
       // (never silently attached to the parent, which could move the ticket early).
-      const refs = extractRefs(pr.title, pr.headBranch, body)
+      const refs = extractLinkRefs({ title: pr.title, branch: pr.headBranch, body })
       const wantedTickets = refs.filter(r => r.subtask === null && existing.has(r.ticket)).map(r => r.ticket)
       const wantedSubtasks = refs.flatMap(r => (r.subtask !== null && subtaskIds.has(`${r.ticket}.${r.subtask}`) ? [subtaskIds.get(`${r.ticket}.${r.subtask}`)!] : []))
 

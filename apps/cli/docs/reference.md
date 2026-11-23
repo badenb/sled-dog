@@ -210,7 +210,7 @@ Statuses: `backlog`, `todo`, `in_progress`, `in_review`, `test`, `done`, `cancel
 - **Safe writes:** `--dry-run` returns what would change without writing (`meta.dry_run: true`). `ticket create` always sends an idempotency key, generated if you omit one and reported in `meta.idempotency_key`; retrying with the same key returns the original ticket instead of creating another.
 - **Permissions:** a token carries scopes (for example `ticket:read`, `ticket:create`, `ticket:update`) and can never exceed the permissions of the person who created it. It stops working if that person loses access. Rejected tokens or scopes exit with code 3, invalid field values with 2, and a missing ticket with 1.
 - **`ticket view`** lists linked pull requests with state, CI result, and review decision. Pull-request titles come from GitHub and are printed as plain text with terminal escapes removed.
-- **`server sync`** asks the server to pull pull requests from the GitHub org or repos its owner configured, link them to tickets (an `SD-<n>` mention in the branch, title, or description; `SD-<n>.<m>` links a subtask), and advance ticket status (merged work lands in `test`). It reports pull requests seen, new links, and tickets moved. It needs `ticket:update`.
+- **`server sync`** asks the server to pull pull requests from the GitHub org or repos its owner configured, link them to tickets (an `SD-<n>` in the branch name or title, or after a keyword such as `closes`, `fixes`, or `part of` in the description; `SD-<n>.<m>` links a subtask), and advance ticket status (merged work lands in `test`). It reports pull requests seen, new links, and tickets moved. It needs `ticket:update`.
 
 <a id="credentials"></a>
 
