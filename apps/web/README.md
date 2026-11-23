@@ -22,13 +22,19 @@ Local secrets go in the repo-root `.env` (gitignored). In production, set real e
 
 ## GitHub sync
 
-An owner chooses one GitHub org or a list of repos under **GitHub** in the app. Pull requests that mention a ticket (`SD-12` in the branch, title, or description) are linked to it and move it automatically:
+An owner chooses one GitHub org or a list of repos under **GitHub** in the app. Pull requests that reference a ticket (`SD-12` in the branch name or title, or after a keyword in the description) are linked to it and move it automatically:
 
 - draft PR open → **in progress**
 - non-draft PR open → **in review**
 - no open PRs and at least one merged → **test** (merged code still needs verifying; a person moves it to **done**)
 
 Tickets only move forward, nothing reaches `done` on its own, and `done`/`canceled` tickets are never changed by sync. Each automatic move is written to the audit log as `github-sync`. Trigger a sync from the app, or with `sled-dog server sync`.
+
+### What links a pull request
+
+- The **branch name** and the **title** always link: any `SD-<n>` or `SD-<n>.<m>` there is a deliberate signal.
+- The **description** links only when a reference **follows a keyword**: `closes`, `fixes`, `resolves`, `part of`, `refs` (one keyword covers a list: `Fixes SD-1, SD-2 and SD-3.1`).
+- A plain mention in the description does **not** link ("see SD-3", "follow-up in SD-4.2", "depends on SD-1"). Descriptions are prose, and a stray mention used to attach a PR to the wrong ticket and move it.
 
 ## Subtasks: several PRs on one ticket
 

@@ -21,6 +21,22 @@ export function extractRefs(...texts: (string | null | undefined)[]): Ref[] {
   return [...found.values()].sort((a, b) => a.ticket - b.ticket || (a.subtask ?? 0) - (b.subtask ?? 0))
 }
 
+// ── What links a PR ───────────────────────────────────────────────────────────
+// The branch name and title are deliberate: any reference there links. The description is prose, where people
+// mention related work ("see SD-3", "follow-up in SD-4.2"), so it links only when a reference FOLLOWS a keyword:
+//   closes/fixes/resolves SD-12      part of SD-12      refs SD-12      Fixes SD-12, SD-13 and SD-14.2
+const REF = String.raw`SD-\d{1,9}(?:\.\d{1,4})?`
+const KEYWORD = String.raw`(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?|part\s+of|refs?|references?)`
+const KEYWORD_REFS = new RegExp(String.raw`(?<![A-Za-z0-9])${KEYWORD}\b[\s:*_\x60]*((?:${REF}(?!\d)[\s,*_\x60]*(?:(?:and|&)[\s*_\x60]*)?)+)`, 'gi')
+
+/** Only the references in a description that follow a link keyword. */
+export const keywordRefsText = (body: string | null | undefined): string[] => [...(body ?? '').matchAll(KEYWORD_REFS)].map(m => m[1]!)
+
+/** Every reference that should link a PR: anything in the branch or title, plus keyworded ones in the description. */
+export function extractLinkRefs(pr: { title?: string | null, branch?: string | null, body?: string | null }): Ref[] {
+  return extractRefs(pr.title, pr.branch, ...keywordRefsText(pr.body))
+}
+
 const RANK: Record<Status, number> = { backlog: 0, todo: 1, in_progress: 2, in_review: 3, test: 4, done: 5, canceled: 6 }
 export const rank = (s: Status) => RANK[s]
 
