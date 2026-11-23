@@ -1,0 +1,261 @@
+{
+  "sections": [
+    {
+      "id": "start",
+      "title": "Get started",
+      "intro": "Four steps from nothing to your first command. You only need a server for the ticket commands; the GitHub commands work on their own.",
+      "items": [
+        {
+          "title": "1. Install",
+          "note": "macOS with Homebrew. Windows, Linux and direct downloads are in the CLI README.",
+          "command": "brew install badenb/tap/sled-dog",
+          "verify": false
+        },
+        {
+          "title": "2. Make a token",
+          "note": "Open API tokens and create one named for whoever will use it (for example claude-code). Choose kind Agent for an automated tool, and tick only the scopes it needs. A token can never do more than you can, and it is shown once.",
+          "link": {
+            "to": "/settings/tokens",
+            "label": "Open API tokens"
+          }
+        },
+        {
+          "title": "3. Connect",
+          "note": "Copy the token, then run this. It reads your clipboard, so the token never lands in your shell history or on screen. Don't copy anything else in between.",
+          "command": "pbpaste | sled-dog server login --url {origin} --with-token"
+        },
+        {
+          "title": "Which server am I using?",
+          "note": "Shows the server the CLI talks to.",
+          "command": "sled-dog server status"
+        },
+        {
+          "title": "4. Check it works",
+          "command": "sled-dog ticket list"
+        },
+        {
+          "title": "Something not working?",
+          "note": "Checks your installation and credential store. It never touches the network or any secret.",
+          "command": "sled-dog doctor"
+        }
+      ]
+    },
+    {
+      "id": "tickets",
+      "title": "Tickets",
+      "intro": "References look like SD-12. Columns are fixed for everyone: backlog, todo, in_progress, in_review, test, done, canceled.",
+      "items": [
+        {
+          "title": "List tickets",
+          "note": "Filter by status or assignee. Add --limit to see more.",
+          "command": "sled-dog ticket list --status in_review"
+        },
+        {
+          "title": "See one ticket",
+          "note": "Shows its trail, its subtasks (with their pull requests and CI), and any linked pull requests.",
+          "command": "sled-dog ticket view SD-12"
+        },
+        {
+          "title": "Create a ticket",
+          "command": "sled-dog ticket create \"Fix login redirect\" --priority high --body \"What is wrong and why it matters\""
+        },
+        {
+          "title": "Change a ticket",
+          "note": "GitHub sync moves tickets for you as pull requests open and merge (draft: in progress, open: in review, merged: test). Move one by hand only when sync cannot know. Moving test to done is a person's call.",
+          "command": "sled-dog ticket update SD-12 --status in_progress"
+        },
+        {
+          "title": "Assign a ticket",
+          "note": "Use an empty string to unassign.",
+          "command": "sled-dog ticket update SD-12 --assignee baden"
+        }
+      ]
+    },
+    {
+      "id": "linking",
+      "title": "Linking pull requests",
+      "intro": "Sync reads your pull requests and links them to tickets by reference. How you name things decides what links.",
+      "items": [
+        {
+          "title": "Name the branch and title after the ticket",
+          "note": "Any reference in the branch name or the pull request title links it: a branch like SD-12-fix-login, a title like \"SD-12: Fix login redirect\". For a subtask use SD-12.2-api. These always link."
+        },
+        {
+          "title": "In the description, use a keyword",
+          "note": "A reference in the description links only after closes, fixes, resolves, part of, or refs, as in \"Closes SD-12\" or \"Part of SD-12\". A plain mention (\"see SD-12\", \"follow-up in SD-12.2\") does not link, so talking about related work never attaches it by accident."
+        },
+        {
+          "title": "Pull GitHub now",
+          "note": "The server syncs every few minutes by itself. Run this to catch up right away. A pull request opened seconds ago can take about 15 seconds to appear, because GitHub's search lags a little.",
+          "command": "sled-dog server sync"
+        }
+      ]
+    },
+    {
+      "id": "subtasks",
+      "title": "Subtasks",
+      "intro": "When one ticket needs several pull requests, split it. The ticket follows its subtasks: it moves to in review, test or done only when every subtask has, so one early pull request cannot carry the whole ticket forward.",
+      "items": [
+        {
+          "title": "Add a subtask",
+          "note": "It gets a reference like SD-12.1. Numbers are never reused.",
+          "command": "sled-dog subtask add SD-12 \"API changes\" --assignee baden"
+        },
+        {
+          "title": "Change a subtask",
+          "command": "sled-dog subtask update SD-12.1 --status in_review"
+        },
+        {
+          "title": "Remove a subtask",
+          "command": "sled-dog subtask remove SD-12.1"
+        }
+      ]
+    },
+    {
+      "id": "trail",
+      "title": "The trail",
+      "intro": "A trail is a ticket's ordered checkpoints: design, copy, approvals, QA. Anyone a checkpoint is assigned to (or anyone on its team) can complete it, even with a read-only role. Address a step by its number in ticket view or by its name.",
+      "items": [
+        {
+          "title": "Add a checkpoint",
+          "note": "Give a team or a person by name. A name that fits two people is refused instead of guessed.",
+          "command": "sled-dog step add SD-12 Design --team Design"
+        },
+        {
+          "title": "Complete a checkpoint",
+          "command": "sled-dog step done SD-12 2"
+        },
+        {
+          "title": "Reopen a checkpoint",
+          "command": "sled-dog step reopen SD-12 design"
+        },
+        {
+          "title": "Assign a checkpoint",
+          "note": "A team or a person; assigning one clears the other. Use --unassign to clear both.",
+          "command": "sled-dog step assign SD-12 3 --team Legal"
+        },
+        {
+          "title": "Remove a checkpoint",
+          "command": "sled-dog step remove SD-12 3"
+        }
+      ]
+    },
+    {
+      "id": "github",
+      "title": "GitHub on its own",
+      "intro": "These work without a Sled Dog server. They read your pull requests and builds straight from GitHub (github.com or Enterprise).",
+      "items": [
+        {
+          "title": "Connect to GitHub",
+          "note": "Paste a personal access token when asked (nothing shows as you type). Add --host for Enterprise.",
+          "command": "sled-dog auth login --host github.com"
+        },
+        {
+          "title": "See your connections",
+          "command": "sled-dog auth status"
+        },
+        {
+          "title": "Switch account",
+          "note": "For people with more than one GitHub account or host.",
+          "command": "sled-dog auth switch --host github.company.com --account your-login"
+        },
+        {
+          "title": "Sign out",
+          "note": "Removes the saved credentials for that account from this machine.",
+          "command": "sled-dog auth logout --host github.com --account your-login"
+        },
+        {
+          "title": "My open pull requests",
+          "command": "sled-dog pr list --mine"
+        },
+        {
+          "title": "Reviews waiting for me",
+          "command": "sled-dog pr list --review-requested --cards"
+        },
+        {
+          "title": "One pull request, and its builds",
+          "command": "sled-dog pr view 'acme/service#42'"
+        },
+        {
+          "title": "Build and check details",
+          "command": "sled-dog pr checks 'acme/service#42'"
+        }
+      ]
+    },
+    {
+      "id": "recipes",
+      "title": "Recipes",
+      "intro": "The commands above, in the order you will actually use them.",
+      "items": [
+        {
+          "title": "Start a piece of work",
+          "note": "Make the ticket, then branch from it. Open the pull request with the reference in its title, and sync moves the ticket to in review.",
+          "command": "sled-dog ticket create \"Add CSV export\" --priority medium"
+        },
+        {
+          "title": "Split work across pull requests",
+          "note": "Add one subtask per pull request, then name each branch after its subtask (SD-13.1-api, SD-13.2-ui). The ticket stays in progress until the last of them reaches review.",
+          "command": "sled-dog subtask add SD-13 \"API\""
+        },
+        {
+          "title": "Check before you change",
+          "note": "--dry-run asks the server to validate the change and say what would happen, including whether the parent ticket would move. Nothing is written.",
+          "command": "sled-dog subtask update SD-13.1 --status in_review --dry-run"
+        }
+      ]
+    },
+    {
+      "id": "agents",
+      "title": "For agents and scripts",
+      "intro": "Every command is built to be driven by a program as well as a person.",
+      "items": [
+        {
+          "title": "Machine-readable output",
+          "note": "--json prints exactly one document: schema_version, data, meta and errors. Nothing else goes to stdout, and there are no colors or progress bars.",
+          "command": "sled-dog ticket list --status in_review --json"
+        },
+        {
+          "title": "Retry safely",
+          "note": "Creating something sends an idempotency key. If a call is retried with the same key you get the original back instead of a duplicate. One is generated for you and printed in meta; pass your own to control it.",
+          "command": "sled-dog ticket create \"Deploy checklist\" --idempotency-key deploy-checklist-1"
+        },
+        {
+          "title": "Pick the server without logging in",
+          "note": "For automation, set these instead of running login. SLED_DOG_API_TOKEN overrides the saved token and is never stored. The server URL must be HTTPS (plain http is allowed only for localhost).",
+          "command": "SLED_DOG_SERVER={origin} SLED_DOG_API_TOKEN=\"$TOKEN\" sled-dog ticket list --json"
+        },
+        {
+          "title": "When something unexpected happens",
+          "note": "An internal error names the exception type (a type field in JSON). Set SLED_DOG_DEBUG=1 to print the traceback to stderr; stdout stays a single JSON document. Review a traceback before sharing it.",
+          "command": "SLED_DOG_DEBUG=1 sled-dog ticket list --json"
+        }
+      ]
+    }
+  ],
+  "exitCodes": [
+    {
+      "code": "0",
+      "meaning": "Done, including an empty result"
+    },
+    {
+      "code": "1",
+      "meaning": "Something failed, or the thing you asked for was not found"
+    },
+    {
+      "code": "2",
+      "meaning": "Invalid arguments: a bad reference, an unknown name, a missing field. Nothing was written"
+    },
+    {
+      "code": "3",
+      "meaning": "Not signed in, or not allowed. The message says which, and why"
+    },
+    {
+      "code": "4",
+      "meaning": "Partial or incomplete result"
+    },
+    {
+      "code": "130",
+      "meaning": "Interrupted"
+    }
+  ]
+}

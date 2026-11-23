@@ -1,9 +1,9 @@
 name: CLI
 on:
   push:
-    paths: ['apps/cli/**', '.github/workflows/cli.yml']
+    paths: ['apps/cli/**', 'apps/web/app/data/codex.json', '.github/workflows/cli.yml']
   pull_request:
-    paths: ['apps/cli/**', '.github/workflows/cli.yml']
+    paths: ['apps/cli/**', 'apps/web/app/data/codex.json', '.github/workflows/cli.yml']
 jobs:
   test:
     strategy:

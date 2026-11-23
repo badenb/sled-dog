@@ -56,7 +56,7 @@ sled-dog ticket update SD-12 --status done --dry-run
 sled-dog server sync                # pull GitHub now
 ```
 
-Add `--json` to any command for machine-readable output.
+Add `--json` to any command for machine-readable output. The **Codex** page in the app lists every command with a copy button, the naming rules that link pull requests to tickets, and tips for agents and scripts.
 
 ## Development
 
