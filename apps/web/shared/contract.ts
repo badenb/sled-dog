@@ -45,7 +45,24 @@ export interface Ticket {
   createdAt: string
   updatedAt: string
   pullRequests?: PullRequestSummary[]
+  steps?: StepLite[]
 }
+
+export const STEP_STATUSES = ['todo', 'done'] as const
+export interface StepLite { id: number, title: string, status: (typeof STEP_STATUSES)[number] }
+/** One checkpoint on a ticket's trail. `canComplete` is computed for the viewer. */
+export interface Step extends StepLite {
+  ticketNumber: number
+  position: number
+  assignee: { id: string, name: string } | null
+  team: { id: string, name: string } | null
+  completedAt: string | null
+  completedBy: string | null
+  canComplete: boolean
+}
+export interface TicketDetail extends Ticket { steps: Step[] }
+export interface Team { id: string, name: string, members: { id: string, name: string }[] }
+export interface Member { id: string, name: string, email: string, role: string }
 
 export interface PullRequestSummary {
   key: string // owner/repo#123
@@ -73,6 +90,7 @@ export type TicketUpdate = z.infer<typeof ticketUpdate>
 export const PERMISSIONS = [
   'ticket:read', 'ticket:create', 'ticket:update', 'ticket:delete',
   'initiative:read', 'initiative:create', 'initiative:update', 'initiative:delete', 'report:read',
+  'step:read', 'step:create', 'step:update', 'step:delete', 'step:complete',
 ] as const
 export const tokenCreate = z.object({
   name: z.string().trim().min(1).max(80),
@@ -85,3 +103,19 @@ const sourceName = z.string().trim().regex(/^[A-Za-z0-9_.-]+(\/[A-Za-z0-9_.-]+)?
 export const githubSourceInput = z.object({ kind: z.enum(['org', 'repo']), name: sourceName })
   .refine(s => (s.kind === 'repo') === s.name.includes('/'), 'An org has no slash; a repo is owner/name')
 export const githubSettingsInput = z.object({ sources: z.array(githubSourceInput).max(25) })
+
+export const stepCreate = z.object({
+  title: z.string().trim().min(1).max(120),
+  assigneeId: z.string().min(1).nullish(),
+  teamId: z.string().min(1).nullish(),
+})
+// Not stepCreate.partial(): same trap as tickets, partial() would keep any defaults.
+export const stepUpdate = z.object({
+  title: z.string().trim().min(1).max(120),
+  status: z.enum(STEP_STATUSES),
+  assigneeId: z.string().min(1).nullable(),
+  teamId: z.string().min(1).nullable(),
+}).partial().refine(v => Object.keys(v).length > 0, 'Nothing to update')
+export const stepOrder = z.object({ order: z.array(z.number().int().positive()).min(1).max(200) })
+export const teamCreate = z.object({ name: z.string().trim().min(1).max(60) })
+export const teamMembers = z.object({ userIds: z.array(z.string().min(1)).max(500) })

@@ -4,6 +4,7 @@ import type { H3Event } from 'h3'
 import { auth } from '../auth'
 import { useDb, schema } from '../db'
 import { roles, type Action, type Resource, type RoleName } from '../../shared/permissions'
+import { mayComplete } from '../../shared/trail'
 
 export interface Actor {
   id: string
@@ -56,11 +57,36 @@ async function fromToken(event: H3Event, resource: Resource, action: Action): Pr
   return { id: row.userId, name: row.actor, kind: row.kind === 'agent' ? 'agent' : 'user', organizationId: row.organizationId, token: row.name }
 }
 
-export async function requirePermission(event: H3Event, resource: Resource, action: Action): Promise<Actor> {
+/** Who is calling, checking a token's scope but not the role. Role/relationship checks happen after. */
+async function resolveActor(event: H3Event, resource: Resource, action: Action): Promise<Actor> {
   const actor = (await fromToken(event, resource, action)) ?? (await fromSession(event))
   if (!actor) throw createError({ statusCode: 401, statusMessage: 'Sign in or provide a bearer token' })
+  return actor
+}
+
+export async function requirePermission(event: H3Event, resource: Resource, action: Action): Promise<Actor> {
+  const actor = await resolveActor(event, resource, action)
   if (!(await memberCan(actor.id, actor.organizationId, resource, action)))
     throw createError({ statusCode: 403, statusMessage: `Your role cannot ${action} ${resource}` })
+  return actor
+}
+
+export async function teamIdsOf(userId: string): Promise<string[]> {
+  const db = await useDb()
+  return (await db.select().from(schema.teamMembers).where(eq(schema.teamMembers.userId, userId))).map(r => r.teamId)
+}
+
+/**
+ * Completing a step is allowed by role (owner, engineer) OR by relationship: the step is assigned to you
+ * or to a team you are in. That lets a designer or approver with a read-only role tick their own checkpoint.
+ */
+export async function requireStepComplete(event: H3Event, step: { assigneeId: string | null, teamId: string | null }): Promise<Actor> {
+  const actor = await resolveActor(event, 'step', 'complete')
+  const allowed = mayComplete({
+    roleCanComplete: await memberCan(actor.id, actor.organizationId, 'step', 'complete'),
+    userId: actor.id, assigneeId: step.assigneeId, teamId: step.teamId, userTeamIds: await teamIdsOf(actor.id),
+  })
+  if (!allowed) throw createError({ statusCode: 403, statusMessage: 'Only the assignee, their team, or an engineer can complete this step' })
   return actor
 }
 
@@ -68,6 +94,14 @@ export async function requirePermission(event: H3Event, resource: Resource, acti
 export async function requireSession(event: H3Event) {
   const actor = await fromSession(event)
   if (!actor) throw createError({ statusCode: 401, statusMessage: 'Sign in required' })
+  return actor
+}
+
+/** Owners only, and browser sessions only: workspace structure is not something an agent token should change. */
+export async function requireOwnerSession(event: H3Event) {
+  const actor = await requireSession(event)
+  if (!(await memberCan(actor.id, actor.organizationId, 'organization', 'update')))
+    throw createError({ statusCode: 403, statusMessage: 'Only owners can do this' })
   return actor
 }
 
