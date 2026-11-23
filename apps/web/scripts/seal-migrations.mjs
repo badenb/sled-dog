@@ -1,4 +1,4 @@
-// Records a checksum for every migration in drizzle/meta/checksums.json.
+// Records a checksum for every migration in drizzle/checksums.json.
 // A migration that has been committed must never change (databases remember it by hash), so by default
 // this only ADDS entries for new migrations and refuses to overwrite one that differs.
 //   npm run db:seal            seal new migrations
@@ -8,7 +8,8 @@ import { readFileSync, writeFileSync, existsSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 
 const dir = fileURLToPath(new URL('../drizzle/', import.meta.url))
-const manifestPath = `${dir}meta/checksums.json`
+// Not in drizzle/meta/: drizzle-kit scans that folder and refuses to run on a file that is not one of its snapshots.
+const manifestPath = `${dir}checksums.json`
 const force = process.argv.includes('--force')
 const journal = JSON.parse(readFileSync(`${dir}meta/_journal.json`, 'utf8'))
 const sealed = existsSync(manifestPath) ? JSON.parse(readFileSync(manifestPath, 'utf8')) : {}
@@ -27,4 +28,4 @@ for (const { tag } of journal.entries) {
 }
 if (refused) process.exit(1)
 writeFileSync(manifestPath, JSON.stringify(next, null, 2) + '\n')
-console.log(`${Object.keys(next).length} migrations sealed in drizzle/meta/checksums.json`)
+console.log(`${Object.keys(next).length} migrations sealed in drizzle/checksums.json`)

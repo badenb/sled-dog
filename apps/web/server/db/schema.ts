@@ -13,7 +13,10 @@ export const tickets = sqliteTable('tickets', {
   updatedAt: text('updated_at').notNull(),
   // Highest subtask number ever issued for this ticket. Only goes up, so SD-12.4 can never be reused after a delete.
   subtaskSeq: integer('subtask_seq').notNull().default(0),
-}, t => [index('tickets_status_idx').on(t.status)])
+  // When it entered done/canceled (null while open), and when it was archived off the board (null = on the board).
+  closedAt: text('closed_at'),
+  archivedAt: text('archived_at'),
+}, t => [index('tickets_status_idx').on(t.status), index('tickets_archived_idx').on(t.archivedAt)])
 
 // Tokens are stored hashed. `kind` separates humans from agents so every
 // mutation can be attributed ("agent X acting for user Y").
@@ -131,3 +134,12 @@ export const subtaskLinks = sqliteTable('subtask_links', {
   subtaskId: integer('subtask_id').notNull(),
   prKey: text('pr_key').notNull(),
 }, t => [primaryKey({ columns: [t.subtaskId, t.prKey] }), index('subtask_links_pr_idx').on(t.prKey)])
+
+// ── Workspace settings ──────────────────────────────────────────────────────
+// One row per workspace; a missing row means the defaults (archive after 30 days).
+export const workspaceSettings = sqliteTable('workspace_settings', {
+  organizationId: text('organization_id').primaryKey(),
+  archiveAfter: integer('archive_after').notNull().default(30), // 0 = never archive automatically
+  archiveUnit: text('archive_unit').notNull().default('days'), // 'days' | 'business_days'
+  updatedAt: text('updated_at').notNull(),
+})

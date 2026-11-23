@@ -2,6 +2,7 @@
 // Takes the db as a parameter and imports no Nuxt auto-imports, so sync tests can run it on an in-memory database.
 import { eq, inArray } from 'drizzle-orm'
 import type { LibSQLDatabase } from 'drizzle-orm/libsql'
+import { closedAtFor } from '../../shared/archive'
 import { nextStatus, statusFromSubtasks, type PrState, type Status } from '../../shared/linking'
 import type * as schemaModule from '../db/schema'
 import { auditLog, pullRequests, subtaskLinks, subtasks, ticketLinks, tickets } from '../db/schema'
@@ -27,7 +28,7 @@ export async function refreshTicketStatus(db: Db, ticketNumber: number, at: stri
     target = nextStatus(ticket.status as Status, asPrs(prs))
   }
   if (target === ticket.status) return null
-  await db.update(tickets).set({ status: target, updatedAt: at }).where(eq(tickets.number, ticketNumber))
+  await db.update(tickets).set({ status: target, updatedAt: at, closedAt: closedAtFor(ticket.status as Status, target, ticket.closedAt, at) }).where(eq(tickets.number, ticketNumber))
   await db.insert(auditLog).values({
     at, actor: who.name, actorKind: who.kind, tokenName: null, action: 'ticket.auto_status', target: `SD-${ticketNumber}`,
     detail: JSON.stringify({ from: ticket.status, to: target, reason }),

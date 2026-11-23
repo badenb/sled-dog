@@ -8,7 +8,7 @@ import { describe, expect, it } from 'vitest'
 
 const dir = fileURLToPath(new URL('../drizzle/', import.meta.url))
 const journal = JSON.parse(readFileSync(`${dir}meta/_journal.json`, 'utf8')) as { entries: { idx: number, tag: string, when: number }[] }
-const sealed = JSON.parse(readFileSync(`${dir}meta/checksums.json`, 'utf8')) as Record<string, string>
+const sealed = JSON.parse(readFileSync(`${dir}checksums.json`, 'utf8')) as Record<string, string>
 const sha = (tag: string) => createHash('sha256').update(readFileSync(`${dir}${tag}.sql`, 'utf8')).digest('hex')
 
 describe('migrations are append-only', () => {
@@ -16,6 +16,12 @@ describe('migrations are append-only', () => {
     const files = readdirSync(dir).filter(f => f.endsWith('.sql')).map(f => f.replace(/\.sql$/, '')).sort()
     expect(journal.entries.map(e => e.tag).sort()).toEqual(files)
     for (const e of journal.entries) expect(existsSync(`${dir}${e.tag}.sql`)).toBe(true)
+  })
+
+  it('keeps the manifest OUT of drizzle/meta, which drizzle-kit scans (a stray file there breaks `drizzle-kit generate`)', () => {
+    expect(existsSync(`${dir}meta/checksums.json`)).toBe(false)
+    const strays = readdirSync(`${dir}meta`).filter(f => f !== '_journal.json' && !/^\d{4}_snapshot\.json$/.test(f))
+    expect(strays, 'only drizzle-kit snapshots and the journal belong in drizzle/meta').toEqual([])
   })
 
   it('timestamps strictly increase (drizzle applies by timestamp)', () => {
