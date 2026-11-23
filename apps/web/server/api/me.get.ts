@@ -16,6 +16,7 @@ export default defineEventHandler(async (event) => {
     const [resource, action] = permission.split(':') as [Resource, Action]
     can[permission] = await memberCan(actor.id, actor.organizationId, resource, action)
   }
+  can['team:manage'] = (member?.role ?? '').split(',').some(r => r.trim() === 'owner')
   can['team:invite'] = (member?.role ?? '').split(',').some(r => ['owner', 'engineer'].includes(r.trim()))
   return envelope({ name: user?.name, email: user?.email, role: member?.role ?? null, organizationId: actor.organizationId, can })
 })

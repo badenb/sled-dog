@@ -83,3 +83,31 @@ export const ticketLinks = sqliteTable('ticket_links', {
   ticketNumber: integer('ticket_number').notNull(),
   prKey: text('pr_key').notNull(),
 }, t => [primaryKey({ columns: [t.ticketNumber, t.prKey] }), index('ticket_links_pr_idx').on(t.prKey)])
+
+// ── Teams and ticket trails ─────────────────────────────────────────────────
+export const teams = sqliteTable('teams', {
+  id: text('id').primaryKey(),
+  organizationId: text('organization_id').notNull(),
+  name: text('name').notNull(),
+  createdAt: text('created_at').notNull(),
+}, t => [uniqueIndex('teams_org_name_uidx').on(t.organizationId, t.name)])
+
+export const teamMembers = sqliteTable('team_members', {
+  teamId: text('team_id').notNull(),
+  userId: text('user_id').notNull(),
+}, t => [primaryKey({ columns: [t.teamId, t.userId] }), index('team_members_user_idx').on(t.userId)])
+
+// A ticket's trail: ordered checkpoints, each assignable to a person and/or a team.
+export const ticketSteps = sqliteTable('ticket_steps', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  ticketNumber: integer('ticket_number').notNull(),
+  title: text('title').notNull(),
+  position: integer('position').notNull(),
+  status: text('status').notNull().default('todo'), // todo | done
+  assigneeId: text('assignee_id'),
+  teamId: text('team_id'),
+  completedAt: text('completed_at'),
+  completedBy: text('completed_by'),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+}, t => [index('ticket_steps_ticket_idx').on(t.ticketNumber, t.position)])

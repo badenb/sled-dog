@@ -15,6 +15,13 @@
       "when": 1795363338802,
       "tag": "0001_github_sync",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1795391706825,
+      "tag": "0002_teams_and_steps",
+      "breakpoints": true
     }
   ]
 }

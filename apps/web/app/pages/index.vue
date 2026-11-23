@@ -1,8 +1,27 @@
 <script setup lang="ts">
 import { TICKET_STATUSES, type Envelope, type Ticket } from '#shared/contract'
 import { byRecent, moveTicket, revertMove } from '#shared/board'
+import type { OriginRect } from '~/components/TicketModal.vue'
 
 const WORKING = TICKET_STATUSES.filter(s => s !== 'canceled')
+
+// The open ticket lives in the URL (?ticket=SD-12): shareable, and Back closes it.
+const route = useRoute()
+const router = useRouter()
+const openId = computed(() => (typeof route.query.ticket === 'string' ? route.query.ticket : null))
+const origin = ref<OriginRect | null>(null)
+function openTicket(id: string, rect: DOMRect) {
+  origin.value = { left: rect.left, top: rect.top, width: rect.width, height: rect.height }
+  router.push({ query: { ...route.query, ticket: id } })
+}
+function closeTicket() {
+  origin.value = null
+  const { ticket: _closed, ...rest } = route.query
+  router.replace({ query: rest })
+}
+let refreshTimer: ReturnType<typeof setTimeout> | undefined
+// Edits in the modal arrive in bursts; refresh the board once they settle.
+const onChanged = () => { clearTimeout(refreshTimer); refreshTimer = setTimeout(() => refreshNuxtData('tickets'), 500) }
 
 const { data: me } = await useMe()
 const toast = useToast()
@@ -101,7 +120,7 @@ const label = (s: string) => s.replace('_', ' ')
       <div class="cards">
         <TicketCard
           v-for="t in byStatus(status)" :key="t.id" :ticket="t" :movable="canMove" :dragging="dragging === t.id" :moving="moving.has(t.id)"
-          @dragstart="onDragStart($event, t.id)" @dragend="dragging = over = null" @move="move(t.id, $event)"
+          @dragstart="onDragStart($event, t.id)" @dragend="dragging = over = null" @move="move(t.id, $event)" @open="openTicket(t.id, $event)"
         />
         <div v-if="!byStatus(status).length" class="empty">{{ canMove ? 'Drop a ticket here' : 'Nothing here' }}</div>
       </div>
@@ -118,9 +137,12 @@ const label = (s: string) => s.replace('_', ' ')
     <div v-if="showCanceled" class="cards">
       <TicketCard
         v-for="t in byStatus('canceled')" :key="t.id" :ticket="t" :movable="canMove" :dragging="dragging === t.id" :moving="moving.has(t.id)"
-        @dragstart="onDragStart($event, t.id)" @dragend="dragging = over = null" @move="move(t.id, $event)"
+        @dragstart="onDragStart($event, t.id)" @dragend="dragging = over = null" @move="move(t.id, $event)" @open="openTicket(t.id, $event)"
       />
       <div v-if="!byStatus('canceled').length" class="empty">No canceled tickets</div>
     </div>
   </div>
+  <ClientOnly>
+    <TicketModal v-if="openId" :id="openId" :key="openId" :from="origin" @close="closeTicket" @changed="onChanged" />
+  </ClientOnly>
 </template>
